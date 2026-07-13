@@ -56,6 +56,22 @@ def test_generation_always_decodes():
         assert len(tree.parts) >= 2
 
 
+def test_generate_batch_matches_single_and_decodes():
+    v = Vocab()
+    cfg = ModelConfig(vocab_size=v.total, d_model=32, n_layers=2, n_heads=2, max_seq=64)
+    m = LegoGPT(cfg)
+    # greedy is deterministic: batched rows must equal the single-sequence path
+    single = [m.generate(v, max_new=64, device="cpu", constrained=True, greedy=True, min_bricks=2)
+              for _ in range(4)]
+    batch = m.generate_batch(v, 4, max_new=64, device="cpu", greedy=True, min_bricks=2, batch_size=4)
+    assert single == batch
+    # uneven chunking still yields valid, decodable streams
+    torch.manual_seed(0)
+    for toks in m.generate_batch(v, 5, max_new=64, device="cpu", min_bricks=2, batch_size=3):
+        assert toks[3] == v.ROOT
+        assert len(decode(toks, v).parts) >= 2
+
+
 def test_evaluate_smoke(tmp_path):
     v = Vocab()
     cfg = ModelConfig(vocab_size=v.total, d_model=32, n_layers=2, n_heads=2, max_seq=64)

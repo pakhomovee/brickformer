@@ -49,14 +49,15 @@ def load_model(ckpt_path: str, device: str):
 def evaluate(ckpt: str, *, n: int = 256, device: str | None = None, seed: int = 0,
              greedy: bool = False, min_bricks: int = 2, max_new: int | None = None,
              collision: bool = True, export: str | None = None, export_n: int = 16,
-             curve_len: int = 128) -> dict:
+             curve_len: int = 128, batch_size: int = 64) -> dict:
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(seed)
     vocab = Vocab()
     model, cfg = load_model(ckpt, device)
     cap = max_new or cfg.max_seq
     print(f"loaded {ckpt} | {model.num_params()/1e6:.1f}M params | device={device} | "
-          f"sampling {n} builds (max_new={cap}, {'greedy' if greedy else 'temp=1'})")
+          f"sampling {n} builds (max_new={cap}, batch_size={batch_size}, "
+          f"{'greedy' if greedy else 'temp=1'})")
 
     do_coll = collision and _HAVE_SCORE
     meshes_missing = False
@@ -67,9 +68,10 @@ def evaluate(ckpt: str, *, n: int = 256, device: str | None = None, seed: int = 
     coll_seen = [0] * curve_len          # samples that reached position k
 
     t0 = time.time()
-    for i in range(n):
-        toks = model.generate(vocab, max_new=cap, device=device, constrained=True,
-                              greedy=greedy, min_bricks=min_bricks)
+    streams = model.generate_batch(vocab, n, max_new=cap, device=device, greedy=greedy,
+                                   min_bricks=min_bricks, batch_size=batch_size)
+    print(f"  generated {n} builds in {time.time()-t0:.0f}s; scoring...")
+    for i, toks in enumerate(streams):
         natural_eos += int(toks[-1] == vocab.EOS)
         try:
             tree = decode(toks, vocab)
@@ -106,7 +108,7 @@ def evaluate(ckpt: str, *, n: int = 256, device: str | None = None, seed: int = 
                     coll_seen[k] += 1
                     coll_hits[k] += int(k in bad)
         if (i + 1) % 50 == 0:
-            print(f"  {i+1}/{n} sampled | {time.time()-t0:.0f}s")
+            print(f"  {i+1}/{n} scored | {time.time()-t0:.0f}s")
 
     m = len(n_bricks)
     rep: dict = {"ckpt": ckpt, "n_requested": n, "n_valid": valid,
@@ -193,10 +195,11 @@ def main():
     ap.add_argument("--no-collision", action="store_true", help="parse-only; skip mesh collision scoring")
     ap.add_argument("--export", default=None, help="dir to write sample .ldr + eval.json + curve.csv")
     ap.add_argument("--export-n", type=int, default=16)
+    ap.add_argument("--batch-size", type=int, default=64, help="builds generated in parallel on the GPU")
     a = ap.parse_args()
     evaluate(a.ckpt, n=a.n, device=a.device, seed=a.seed, greedy=a.greedy,
              min_bricks=a.min_bricks, max_new=a.max_new, collision=not a.no_collision,
-             export=a.export, export_n=a.export_n)
+             export=a.export, export_n=a.export_n, batch_size=a.batch_size)
 
 
 if __name__ == "__main__":

@@ -140,6 +140,64 @@ class LegoGPT(nn.Module):
         return logits, loss
 
     @torch.no_grad()
+    def _step_logits(self, ids):
+        """Logits for the LAST position only -- (B, vocab). Applies the head to just the final
+        hidden state, avoiding the (B, T, vocab) tensor that dominates memory during generation."""
+        dh = self.cfg.d_model // self.cfg.n_heads
+        cos, sin = _rope_cache(ids.shape[1], dh, self.cfg.rope_base, ids.device)
+        x = self.tok(ids)
+        for b in self.blocks:
+            x = b(x, cos, sin)
+        return self.head(self.norm(x[:, -1:, :]))[:, -1, :]
+
+    @torch.no_grad()
+    def generate_batch(self, vocab: Vocab, n: int, max_new: int | None = None, device="cpu",
+                       greedy: bool = False, min_bricks: int = 1, batch_size: int = 64):
+        """Grammar-constrained generation of `n` builds in parallel (per-row GrammarState), in
+        chunks of `batch_size`. Returns a list of `n` token streams (each starts with BOS).
+        Each row masks logits to its own grammar; finished rows emit PAD until the chunk ends."""
+        self.eval()
+        cap = max_new or self.cfg.max_seq
+        p_lo = vocab.offset["PART"]
+        p_hi = p_lo + vocab.size_of["PART"]
+        streams: list[list[int]] = []
+        for start in range(0, n, batch_size):
+            B = min(batch_size, n - start)
+            ids = torch.full((B, 1), vocab.BOS, dtype=torch.long, device=device)
+            states = [GrammarState(vocab) for _ in range(B)]
+            done = [False] * B
+            parts = [0] * B
+            out = [[vocab.BOS] for _ in range(B)]
+            for _ in range(cap):
+                logits = self._step_logits(ids[:, -self.cfg.max_seq:])          # (B, vocab)
+                mask = torch.full_like(logits, float("-inf"))
+                for r in range(B):
+                    if done[r]:
+                        allowed = [vocab.PAD]
+                    else:
+                        allowed = states[r].allowed_ids()
+                        if parts[r] < min_bricks:
+                            allowed = [i for i in allowed if i != vocab.EOS]
+                    mask[r, allowed] = logits[r, allowed]
+                nxt = (mask.argmax(-1) if greedy
+                       else torch.multinomial(mask.softmax(-1), 1).squeeze(-1))
+                ids = torch.cat([ids, nxt[:, None]], dim=1)
+                for r in range(B):
+                    if done[r]:
+                        continue
+                    t = int(nxt[r])
+                    out[r].append(t)
+                    if p_lo <= t < p_hi:
+                        parts[r] += 1
+                    states[r].step(t)
+                    if states[r].done:
+                        done[r] = True
+                if all(done):
+                    break
+            streams.extend(out)
+        return streams
+
+    @torch.no_grad()
     def generate(self, vocab: Vocab, max_new: int = 4096, device="cpu",
                  constrained: bool = True, greedy: bool = True, min_bricks: int = 1):
         """Autoregressive generation from BOS. With `constrained`, logits are masked to the
