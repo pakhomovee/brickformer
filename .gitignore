@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/ldraw_lib/
+data/complete.zip
+# BrickNet dataset artifacts (kept out of git; pulled per-machine)
+data/*.npz
+data/*.npz.xz
+data/*.tar.xz
+data/*.jsonl
+data/*.jsonl.xz
+data/*.bin
+data/*.bin.meta.json
+runs/

@@ -1,0 +1,12 @@
+# Stage-0 pipeline deps (CPU-only, wheel-only — no compiler needed).
+numpy>=2.0
+pytest>=8.0
+# BrickNet's own package: connector-annotated catalog (14.5k parts), typed connector graph
+# with articulation DOF, spanning-tree serialization, collision scorer. This is now the
+# representation substrate — our from-scratch tokenizer (tokenize/) is kept as reference only.
+bricknet>=0.1.0
+# torch: needed for the model + CPU overfit smoke test. On this CPU dev box install the CPU wheel
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# (plain `pip install torch` pulls the large CUDA build). The GPU box uses the CUDA wheel.
+torch>=2.0
+# Other heavy deps (transformers, dinov2, blender) are deferred to the GPU stage, not installed here.
