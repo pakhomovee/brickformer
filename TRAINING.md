@@ -88,6 +88,33 @@ runs/pretrain-<size>/train.json  # params, tokens, best val loss, wall-clock min
 data/pretrain.bin.meta.json      # corpus stats + observed field maxima
 ```
 
+## 7. Evaluate the trained model
+
+Val loss (in `train.json`) tells you the model is learning, but the real quality metrics are about
+the *builds it generates*. The eval harness samples builds and scores them:
+
+```bash
+# collision scoring needs the inset meshes once per box (from the dataset's inset.tar.xz):
+mkdir -p data/bricknet_data/inset && tar -xJf data/inset.tar.xz -C data/bricknet_data/inset
+export BRICKNET_DATA="$PWD/data/bricknet_data"     # or: python -m bricknet fetch-meshes
+
+python -m lego_tf.bnet.evaluate --ckpt runs/pretrain-25M/best.pt --n 256 --export runs/eval
+```
+
+Reports (and writes `runs/eval/eval.json` + `collision_curve.csv` + sample `.ldr` files):
+
+- **validity** — fraction that decode to a build (grammar-constrained, so ~100%).
+- **connector-valid** — fraction whose (part, connector) pairs physically realize. Climbs toward
+  100% as the model learns; near 0% means undertrained.
+- **collision-free rate** and **collision-free horizon** — longest collision-free placement prefix
+  per build. **BrickNet's implied bar is ~20 steps** — beating it is the M1 gate.
+- **per-step collision curve** — collision rate vs sequence position (the architecture signal).
+- **unforced-EOS rate** — did it learn to stop on its own.
+
+Open the exported `runs/eval/sample_*.ldr` in any LDraw viewer (Studio, LeoCAD, or an online
+viewer) to eyeball the builds. Drop `--export`/set `--no-collision` for a quick parse-only check
+without meshes.
+
 ---
 
 ## Reference: time & GPU

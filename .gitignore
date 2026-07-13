@@ -2,14 +2,8 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-data/ldraw_lib/
-data/complete.zip
-# BrickNet dataset artifacts (kept out of git; pulled per-machine)
-data/*.npz
-data/*.npz.xz
-data/*.tar.xz
-data/*.jsonl
-data/*.jsonl.xz
-data/*.bin
-data/*.bin.meta.json
+# Ignore everything under data/ -- dataset artifacts (.npz/.jsonl/.tar.xz), tokenized .bin,
+# extracted collision meshes, etc. -- EXCEPT the public LDraw OMR sample fixtures the tests use.
+data/*
+!data/samples/
 runs/

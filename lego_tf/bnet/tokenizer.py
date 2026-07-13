@@ -118,13 +118,14 @@ class GrammarState:
     def reset(self):
         self.exp = ["PART"]      # segments still required for the current brick
         self.done = False
+        self.n_bricks = 0        # bricks completed so far (brick 0 is the tree root)
 
     def allowed_segments(self) -> list[str]:
         seg = self.exp[0]
         if seg == "PART":        # brick boundary: start another brick or stop
             return ["PART", "EOS"]
-        if seg == "ATTACH":
-            return ["ROOT", "PTR"]
+        if seg == "ATTACH":      # exactly one root (brick 0); every later brick attaches via PTR
+            return ["ROOT"] if self.n_bricks == 0 else ["PTR"]
         return [seg]
 
     def allowed_ids(self) -> list[int]:
@@ -151,12 +152,18 @@ class GrammarState:
         elif exp == "ATTACH":
             if seg == "ROOT":
                 self.exp = ["PART"]
+                self.n_bricks += 1
             else:  # PTR
                 self.exp = ["PSUB", "CSUB", "PCONN", "CCONN", "FAMILY"]
         elif exp == "FAMILY":
-            self.exp = list(_DOF_SEGS[self.v.local(gid, "FAMILY")]) or ["PART"]
+            dof = list(_DOF_SEGS[self.v.local(gid, "FAMILY")])
+            self.exp = dof if dof else ["PART"]
+            if not dof:
+                self.n_bricks += 1
         else:  # PSUB/CSUB/PCONN/CCONN/FLIP/ANGLE/SLIDE
             self.exp = self.exp[1:] or ["PART"]
+            if self.exp == ["PART"]:
+                self.n_bricks += 1
 
 
 def _edge_fields(e) -> dict:
@@ -232,26 +239,31 @@ def decode(tokens: list[int], vocab: Vocab):
         if nx == vocab.ROOT:
             return part, None
         ptr = expect_seg(nx, "PTR")
-        if i - ptr < 0:
-            return part, None  # pointer past the start (only from an untrained sampler) -> root
-        base = dict(parent=i - ptr, child=i,
-                    parent_sub=expect_seg(nxt(), "PSUB"), child_sub=expect_seg(nxt(), "CSUB"),
-                    parent_conn=expect_seg(nxt(), "PCONN"), child_conn=expect_seg(nxt(), "CCONN"))
+        # Consume the whole brick body BEFORE validating the pointer, so a bad pointer (which only
+        # an untrained sampler emits) drops just this edge without desyncing the token stream.
+        psub, csub = expect_seg(nxt(), "PSUB"), expect_seg(nxt(), "CSUB")
+        pconn, cconn = expect_seg(nxt(), "PCONN"), expect_seg(nxt(), "CCONN")
         fam = expect_seg(nxt(), "FAMILY")
         if fam == STUD:
-            return part, StudEdge(**base, yaw=expect_seg(nxt(), "ANGLE"))
-        if fam == FIXED:
-            return part, FixedEdge(**base)
-        if fam == HINGE:
-            flip = bool(expect_seg(nxt(), "FLIP"))
-            return part, HingeEdge(**base, flip=flip, yaw=expect_seg(nxt(), "ANGLE"))
-        if fam == AXLE:
-            flip = bool(expect_seg(nxt(), "FLIP"))
-            yaw = expect_seg(nxt(), "ANGLE")
-            return part, AxleEdge(**base, flip=flip, yaw=yaw, slide=expect_seg(nxt(), "SLIDE") + SLIDE_MIN)
-        rx = expect_seg(nxt(), "ANGLE")
-        ry = expect_seg(nxt(), "ANGLE")
-        return part, BallEdge(**base, rx=rx, ry=ry, rz=expect_seg(nxt(), "ANGLE"))
+            make = lambda **b: StudEdge(**b, yaw=dof[0])
+            dof = [expect_seg(nxt(), "ANGLE")]
+        elif fam == FIXED:
+            make = lambda **b: FixedEdge(**b)
+            dof = []
+        elif fam == HINGE:
+            dof = [bool(expect_seg(nxt(), "FLIP")), expect_seg(nxt(), "ANGLE")]
+            make = lambda **b: HingeEdge(**b, flip=dof[0], yaw=dof[1])
+        elif fam == AXLE:
+            dof = [bool(expect_seg(nxt(), "FLIP")), expect_seg(nxt(), "ANGLE"),
+                   expect_seg(nxt(), "SLIDE") + SLIDE_MIN]
+            make = lambda **b: AxleEdge(**b, flip=dof[0], yaw=dof[1], slide=dof[2])
+        else:  # BALL
+            dof = [expect_seg(nxt(), "ANGLE"), expect_seg(nxt(), "ANGLE"), expect_seg(nxt(), "ANGLE")]
+            make = lambda **b: BallEdge(**b, rx=dof[0], ry=dof[1], rz=dof[2])
+        if not 0 <= i - ptr < i:   # pointer at/past the start -> keep the part, drop the edge
+            return part, None
+        return part, make(parent=i - ptr, child=i, parent_sub=psub, child_sub=csub,
+                          parent_conn=pconn, child_conn=cconn)
 
     for gid in it:
         if gid == vocab.EOS:
