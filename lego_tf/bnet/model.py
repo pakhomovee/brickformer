@@ -29,6 +29,8 @@ class ModelConfig:
     use_pose: bool = False       # v1: add each token's delayed resolved-pose feature to its embedding
     pose_dim: int = 9            # translation (3) + rotation 6D (6); see trees.pose_feature_rows
     pose_fourier_k: int = 8      # Fourier frequencies for the position channel
+    cond_dim: int = 0            # SFT: caption-embedding dim (0 = unconditional); a prefix of projected
+                                 # caption vectors is prepended to the token stream (see captions.py)
 
     def ff(self) -> int:
         if self.d_ff is not None:
@@ -111,14 +113,17 @@ class Attention(nn.Module):
         self.qkv = nn.Linear(cfg.d_model, 3 * cfg.d_model, bias=False)
         self.proj = nn.Linear(cfg.d_model, cfg.d_model, bias=False)
 
-    def forward(self, x, cos, sin):
+    def forward(self, x, cos, sin, attn_mask=None):
         B, T, D = x.shape
         q, k, v = self.qkv(x).split(D, dim=2)
         q = q.view(B, T, self.h, self.dh).transpose(1, 2)
         k = k.view(B, T, self.h, self.dh).transpose(1, 2)
         v = v.view(B, T, self.h, self.dh).transpose(1, 2)
         q, k = _apply_rope(q, cos, sin), _apply_rope(k, cos, sin)
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        if attn_mask is None:                                    # fast path: plain causal
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        else:                                                    # mask already encodes causality
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
         y = y.transpose(1, 2).reshape(B, T, D)
         return self.proj(y)
 
@@ -143,8 +148,8 @@ class Block(nn.Module):
         self.n2 = RMSNorm(cfg.d_model)
         self.mlp = SwiGLU(cfg)
 
-    def forward(self, x, cos, sin):
-        x = x + self.attn(self.n1(x), cos, sin)
+    def forward(self, x, cos, sin, attn_mask=None):
+        x = x + self.attn(self.n1(x), cos, sin, attn_mask)
         x = x + self.mlp(self.n2(x))
         return x
 
@@ -155,6 +160,11 @@ class LegoGPT(nn.Module):
         self.cfg = cfg
         self.tok = nn.Embedding(cfg.vocab_size, cfg.d_model)
         self.pose_embed = PoseEmbed(cfg) if cfg.use_pose else None
+        # caption conditioning (SFT): project encoder embeddings to a prefix; null_cond is the learned
+        # unconditional prefix used for classifier-free guidance (dropped captions train it).
+        self.cond_proj = nn.Linear(cfg.cond_dim, cfg.d_model, bias=False) if cfg.cond_dim else None
+        self.cond_norm = RMSNorm(cfg.d_model) if cfg.cond_dim else None
+        self.null_cond = nn.Parameter(torch.zeros(1, 1, cfg.d_model)) if cfg.cond_dim else None
         self.blocks = nn.ModuleList(Block(cfg) for _ in range(cfg.n_layers))
         self.norm = RMSNorm(cfg.d_model)
         self.head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
@@ -170,15 +180,39 @@ class LegoGPT(nn.Module):
     def num_params(self) -> int:
         return sum(p.numel() for p in self.parameters()) - self.tok.weight.numel()  # tied head
 
-    def forward(self, ids, targets=None, ignore_index=-100, pose=None):
-        dh = self.cfg.d_model // self.cfg.n_heads
-        cos, sin = _rope_cache(ids.shape[1], dh, self.cfg.rope_base, ids.device)
+    def cond_prefix(self, cond):
+        """(B, C, cond_dim) caption-encoder embeddings -> (B, C, d_model) prefix to prepend."""
+        return self.cond_norm(self.cond_proj(cond))
+
+    def _prefix_attn_mask(self, cond_mask, S, C):
+        """(B,1,S,S) bool: causal AND no key attends to a padded prefix position (variable-length
+        captions in a training batch). LEGO positions [C:] are always valid keys."""
+        keep_key = torch.ones(cond_mask.shape[0], S, dtype=torch.bool, device=cond_mask.device)
+        keep_key[:, :C] = cond_mask.bool()
+        causal = torch.tril(torch.ones(S, S, dtype=torch.bool, device=cond_mask.device))
+        return causal[None, None] & keep_key[:, None, None, :]
+
+    def forward(self, ids, targets=None, ignore_index=-100, pose=None, cond=None, cond_mask=None,
+                cond_drop=None):
         x = self.tok(ids)
         if self.pose_embed is not None and pose is not None:
-            x = x + self.pose_embed(pose)
+            x = x + self.pose_embed(pose)                    # pose aligns with LEGO tokens (pre-prefix)
+        C, attn_mask = 0, None
+        if cond is not None:
+            prefix = self.cond_prefix(cond)                  # (B, C, D)
+            if cond_drop is not None:                        # CFG: dropped rows -> learned null prefix
+                prefix = torch.where(cond_drop[:, None, None], self.null_cond, prefix)
+            C = prefix.shape[1]
+            x = torch.cat([prefix, x], dim=1)                # caption prefix precedes the token stream
+            if cond_mask is not None:
+                attn_mask = self._prefix_attn_mask(cond_mask, x.shape[1], C)
+        dh = self.cfg.d_model // self.cfg.n_heads
+        cos, sin = _rope_cache(x.shape[1], dh, self.cfg.rope_base, x.device)
         for b in self.blocks:
-            x = b(x, cos, sin)
+            x = b(x, cos, sin, attn_mask)
         logits = self.head(self.norm(x))
+        if C:
+            logits = logits[:, C:, :]                        # keep only LEGO positions (align w/ ids/targets)
         loss = None
         if targets is not None:
             loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1),
@@ -186,44 +220,66 @@ class LegoGPT(nn.Module):
         return logits, loss
 
     @torch.no_grad()
-    def _step_logits(self, ids, pose=None):
+    def _step_logits(self, ids, pose=None, cond_prefix=None):
         """Logits for the LAST position only -- (B, vocab). Applies the head to just the final
-        hidden state, avoiding the (B, T, vocab) tensor that dominates memory during generation."""
-        dh = self.cfg.d_model // self.cfg.n_heads
-        cos, sin = _rope_cache(ids.shape[1], dh, self.cfg.rope_base, ids.device)
+        hidden state, avoiding the (B, T, vocab) tensor that dominates memory during generation.
+        `cond_prefix` (B, C, d_model) is a precomputed caption prefix prepended to the stream."""
         x = self.tok(ids)
         if self.pose_embed is not None and pose is not None:
             x = x + self.pose_embed(pose)
+        if cond_prefix is not None:
+            x = torch.cat([cond_prefix, x], dim=1)
+        dh = self.cfg.d_model // self.cfg.n_heads
+        cos, sin = _rope_cache(x.shape[1], dh, self.cfg.rope_base, x.device)
         for b in self.blocks:
             x = b(x, cos, sin)
         return self.head(self.norm(x[:, -1:, :]))[:, -1, :]
 
     @torch.no_grad()
-    def _gathered_logits(self, ids, gidx, pose=None):
+    def _gathered_logits(self, ids, gidx, pose=None, cond_prefix=None):
         """Logits at each row's own position `gidx[r]` -- (B, vocab). Lets rows be right-padded to
         different real lengths (needed when rows roll back independently) without materializing the
-        (B, T, vocab) tensor: gather the hidden state at gidx, then apply the head."""
-        dh = self.cfg.d_model // self.cfg.n_heads
-        cos, sin = _rope_cache(ids.shape[1], dh, self.cfg.rope_base, ids.device)
+        (B, T, vocab) tensor: gather the hidden state at gidx, then apply the head. `cond_prefix`
+        (B, C, d_model) is a precomputed caption prefix; gidx indexes LEGO tokens, so it shifts by C."""
         x = self.tok(ids)
         if self.pose_embed is not None and pose is not None:
             x = x + self.pose_embed(pose)
+        C = 0
+        if cond_prefix is not None:
+            x = torch.cat([cond_prefix, x], dim=1)
+            C = cond_prefix.shape[1]
+        dh = self.cfg.d_model // self.cfg.n_heads
+        cos, sin = _rope_cache(x.shape[1], dh, self.cfg.rope_base, x.device)
         for b in self.blocks:
             x = b(x, cos, sin)
-        h = x[torch.arange(ids.shape[0], device=ids.device), gidx]   # (B, D) -- each row's last real token
+        h = x[torch.arange(ids.shape[0], device=ids.device), gidx + C]   # (B, D) -- each row's last real token
         return self.head(self.norm(h))
+
+    def _cond_prefixes(self, cond, B, device):
+        """One batch-wide caption -> (cond_prefix, null_prefix), each (B, C, d_model); (None, None) if
+        unconditional. `cond` is the caption embedding: (cond_dim,) pooled or (C, cond_dim) per-word."""
+        if cond is None or self.cond_proj is None:
+            return None, None
+        c = torch.as_tensor(cond, dtype=torch.float32, device=device)
+        c = c.reshape(1, -1, self.cfg.cond_dim)                          # (1, C, cond_dim)
+        cp = self.cond_prefix(c).expand(B, -1, -1)                       # (B, C, d_model)
+        npf = self.null_cond.expand(B, cp.shape[1], -1)                  # (B, C, d_model) null baseline
+        return cp, npf
 
     @torch.no_grad()
     def generate_batch(self, vocab: Vocab, n: int, max_new: int | None = None, device="cpu",
                        greedy: bool = False, min_bricks: int = 1, batch_size: int = 64,
-                       resolve_pose=None):
+                       resolve_pose=None, cond=None, cfg_weight: float = 1.0):
         """Grammar-constrained generation of `n` builds in parallel (per-row GrammarState), in
         chunks of `batch_size`. Returns a list of `n` token streams (each starts with BOS).
         Each row masks logits to its own grammar; finished rows emit PAD until the chunk ends.
 
         For a v1 (use_pose) model, `resolve_pose(tokens) -> (POSE_DIM,) float array` resolves the
         pose of the last completed brick in a partial stream; each token then carries the previous
-        brick's pose (P[i-1]), matching training. Defaults to the built-in resolver."""
+        brick's pose (P[i-1]), matching training. Defaults to the built-in resolver.
+
+        For an SFT (cond_dim) model, `cond` is one batch-wide caption embedding; `cfg_weight` > 1
+        applies classifier-free guidance (blend of the caption and null-prefix logits)."""
         self.eval()
         cap = max_new or self.cfg.max_seq
         p_lo = vocab.offset["PART"]
@@ -235,6 +291,8 @@ class LegoGPT(nn.Module):
         streams: list[list[int]] = []
         for start in range(0, n, batch_size):
             B = min(batch_size, n - start)
+            cp, npf = self._cond_prefixes(cond, B, device)
+            win = self.cfg.max_seq - (cp.shape[1] if cp is not None else 0)   # leave room for the prefix
             ids = torch.full((B, 1), vocab.BOS, dtype=torch.long, device=device)
             states = [GrammarState(vocab) for _ in range(B)]
             done = [False] * B
@@ -245,8 +303,11 @@ class LegoGPT(nn.Module):
                 pose_hist = torch.zeros((B, 1, pdim), dtype=torch.float32, device=device)
                 cur_pose = [[0.0] * pdim for _ in range(B)]
             for _ in range(cap):
-                pose_arg = pose_hist[:, -self.cfg.max_seq:] if use_pose else None
-                logits = self._step_logits(ids[:, -self.cfg.max_seq:], pose=pose_arg)   # (B, vocab)
+                pose_arg = pose_hist[:, -win:] if use_pose else None
+                logits = self._step_logits(ids[:, -win:], pose=pose_arg, cond_prefix=cp)   # (B, vocab)
+                if cp is not None and cfg_weight != 1.0:
+                    unc = self._step_logits(ids[:, -win:], pose=pose_arg, cond_prefix=npf)
+                    logits = unc + cfg_weight * (logits - unc)
                 mask = torch.full_like(logits, float("-inf"))
                 for r in range(B):
                     if done[r]:
@@ -283,7 +344,7 @@ class LegoGPT(nn.Module):
     @torch.no_grad()
     def generate_batch_cf(self, vocab: Vocab, n: int, max_new: int | None = None, device="cpu",
                           min_bricks: int = 1, batch_size: int = 64, max_retries: int = 8,
-                          temperature: float = 1.0):
+                          temperature: float = 1.0, cond=None, cfg_weight: float = 1.0):
         """Collision-aware generation: the connector grammar of `generate_batch`, plus a per-build
         incremental collision scene. When a completed brick would collide with the built structure,
         its tokens are rolled back and the brick is resampled (up to `max_retries`); on exhaustion
@@ -304,13 +365,14 @@ class LegoGPT(nn.Module):
 
         self.eval()
         cap = max_new or self.cfg.max_seq
-        max_seq = self.cfg.max_seq
         use_pose = self.pose_embed is not None
         pdim = self.cfg.pose_dim
         streams: list[list[int]] = []
 
         for start in range(0, n, batch_size):
             B = min(batch_size, n - start)
+            cp, npf = self._cond_prefixes(cond, B, device)
+            max_seq = self.cfg.max_seq - (cp.shape[1] if cp is not None else 0)  # room for the prefix
             buf = [[vocab.BOS] for _ in range(B)]
             gs = [GrammarState(vocab) for _ in range(B)]
             scene = [CollisionScene() for _ in range(B)]
@@ -342,7 +404,10 @@ class LegoGPT(nn.Module):
                     gidx[r] = w - 1
                     if use_pose:
                         posewin[r, :w] = torch.tensor(pose_hist[r][-w:], dtype=torch.float32, device=device)
-                last = self._gathered_logits(ids, gidx, pose=posewin)   # (B, vocab)
+                last = self._gathered_logits(ids, gidx, pose=posewin, cond_prefix=cp)   # (B, vocab)
+                if cp is not None and cfg_weight != 1.0:
+                    unc = self._gathered_logits(ids, gidx, pose=posewin, cond_prefix=npf)
+                    last = unc + cfg_weight * (last - unc)
                 mask = torch.full_like(last, float("-inf"))
                 for r in range(B):
                     if done[r]:
