@@ -1,0 +1,266 @@
+=== v0 model ===
+
+training results:
+
+device=cuda size=25M params=24.9M ctx=1024 batch=120x1 => 122880 tok/iter, 5000 iters => 614M tokens | use_pose=False
+iter      0/5000 | loss 10.1202 | lr 7.00e-06 | 96k tok/s | ETA 107m
+iter     50/5000 | loss 4.2485 | lr 3.57e-04 | 282k tok/s | ETA 36m
+iter    100/5000 | loss 2.7538 | lr 7.00e-04 | 287k tok/s | ETA 35m
+iter    150/5000 | loss 2.3159 | lr 7.00e-04 | 288k tok/s | ETA 34m
+iter    200/5000 | loss 1.9911 | lr 6.99e-04 | 289k tok/s | ETA 34m
+iter    250/5000 | loss 1.8845 | lr 6.98e-04 | 289k tok/s | ETA 34m
+iter    300/5000 | loss 1.7649 | lr 6.97e-04 | 290k tok/s | ETA 33m
+iter    350/5000 | loss 1.7082 | lr 6.96e-04 | 290k tok/s | ETA 33m
+iter    400/5000 | loss 1.6415 | lr 6.94e-04 | 290k tok/s | ETA 32m
+iter    450/5000 | loss 1.5726 | lr 6.92e-04 | 290k tok/s | ETA 32m
+iter    500/5000 | loss 1.5529 | lr 6.89e-04 | 290k tok/s | ETA 32m
+iter    550/5000 | loss 1.5224 | lr 6.86e-04 | 290k tok/s | ETA 31m
+iter    600/5000 | loss 1.5365 | lr 6.83e-04 | 290k tok/s | ETA 31m
+iter    650/5000 | loss 1.4486 | lr 6.79e-04 | 290k tok/s | ETA 31m
+iter    700/5000 | loss 1.4686 | lr 6.76e-04 | 291k tok/s | ETA 30m
+iter    750/5000 | loss 1.4127 | lr 6.71e-04 | 291k tok/s | ETA 30m
+iter    800/5000 | loss 1.4143 | lr 6.67e-04 | 291k tok/s | ETA 30m
+iter    850/5000 | loss 1.3880 | lr 6.62e-04 | 291k tok/s | ETA 29m
+iter    900/5000 | loss 1.3801 | lr 6.57e-04 | 291k tok/s | ETA 29m
+iter    950/5000 | loss 1.3409 | lr 6.51e-04 | 291k tok/s | ETA 29m
+iter   1000/5000 | loss 1.3849 | lr 6.46e-04 | 291k tok/s | ETA 28m
+  >> val loss 1.4982
+iter   1050/5000 | loss 1.3296 | lr 6.40e-04 | 286k tok/s | ETA 28m
+iter   1100/5000 | loss 1.3475 | lr 6.33e-04 | 286k tok/s | ETA 28m
+iter   1150/5000 | loss 1.2856 | lr 6.27e-04 | 286k tok/s | ETA 28m
+iter   1200/5000 | loss 1.2999 | lr 6.20e-04 | 286k tok/s | ETA 27m
+iter   1250/5000 | loss 1.2971 | lr 6.13e-04 | 287k tok/s | ETA 27m
+iter   1300/5000 | loss 1.2870 | lr 6.06e-04 | 287k tok/s | ETA 26m
+iter   1350/5000 | loss 1.2938 | lr 5.98e-04 | 287k tok/s | ETA 26m
+iter   1400/5000 | loss 1.2982 | lr 5.90e-04 | 287k tok/s | ETA 26m
+iter   1450/5000 | loss 1.2483 | lr 5.82e-04 | 287k tok/s | ETA 25m
+iter   1500/5000 | loss 1.2702 | lr 5.74e-04 | 287k tok/s | ETA 25m
+iter   1550/5000 | loss 1.2641 | lr 5.65e-04 | 287k tok/s | ETA 25m
+iter   1600/5000 | loss 1.2610 | lr 5.57e-04 | 287k tok/s | ETA 24m
+iter   1650/5000 | loss 1.2458 | lr 5.48e-04 | 288k tok/s | ETA 24m
+iter   1700/5000 | loss 1.2494 | lr 5.39e-04 | 288k tok/s | ETA 23m
+iter   1750/5000 | loss 1.2205 | lr 5.29e-04 | 288k tok/s | ETA 23m
+iter   1800/5000 | loss 1.2175 | lr 5.20e-04 | 288k tok/s | ETA 23m
+iter   1850/5000 | loss 1.2545 | lr 5.10e-04 | 288k tok/s | ETA 22m
+iter   1900/5000 | loss 1.2137 | lr 5.01e-04 | 288k tok/s | ETA 22m
+iter   1950/5000 | loss 1.2137 | lr 4.91e-04 | 288k tok/s | ETA 22m
+iter   2000/5000 | loss 1.2046 | lr 4.81e-04 | 288k tok/s | ETA 21m
+  >> val loss 1.4168
+iter   2050/5000 | loss 1.1921 | lr 4.71e-04 | 286k tok/s | ETA 21m
+iter   2100/5000 | loss 1.2086 | lr 4.60e-04 | 286k tok/s | ETA 21m
+iter   2150/5000 | loss 1.1877 | lr 4.50e-04 | 286k tok/s | ETA 20m
+iter   2200/5000 | loss 1.1903 | lr 4.40e-04 | 286k tok/s | ETA 20m
+iter   2250/5000 | loss 1.1623 | lr 4.29e-04 | 286k tok/s | ETA 20m
+iter   2300/5000 | loss 1.1770 | lr 4.18e-04 | 286k tok/s | ETA 19m
+iter   2350/5000 | loss 1.1619 | lr 4.08e-04 | 286k tok/s | ETA 19m
+iter   2400/5000 | loss 1.1473 | lr 3.97e-04 | 286k tok/s | ETA 19m
+iter   2450/5000 | loss 1.1455 | lr 3.86e-04 | 287k tok/s | ETA 18m
+iter   2500/5000 | loss 1.1589 | lr 3.76e-04 | 287k tok/s | ETA 18m
+iter   2550/5000 | loss 1.1466 | lr 3.65e-04 | 287k tok/s | ETA 17m
+iter   2600/5000 | loss 1.1350 | lr 3.54e-04 | 287k tok/s | ETA 17m
+iter   2650/5000 | loss 1.1196 | lr 3.44e-04 | 287k tok/s | ETA 17m
+iter   2700/5000 | loss 1.1295 | lr 3.33e-04 | 287k tok/s | ETA 16m
+iter   2750/5000 | loss 1.1241 | lr 3.22e-04 | 287k tok/s | ETA 16m
+iter   2800/5000 | loss 1.1131 | lr 3.12e-04 | 287k tok/s | ETA 16m
+iter   2850/5000 | loss 1.0878 | lr 3.01e-04 | 287k tok/s | ETA 15m
+iter   2900/5000 | loss 1.1177 | lr 2.90e-04 | 287k tok/s | ETA 15m
+iter   2950/5000 | loss 1.1348 | lr 2.80e-04 | 287k tok/s | ETA 15m
+iter   3000/5000 | loss 1.0475 | lr 2.70e-04 | 287k tok/s | ETA 14m
+  >> val loss 1.4301
+iter   3050/5000 | loss 1.0790 | lr 2.59e-04 | 286k tok/s | ETA 14m
+iter   3100/5000 | loss 1.1046 | lr 2.49e-04 | 286k tok/s | ETA 14m
+iter   3150/5000 | loss 1.1003 | lr 2.39e-04 | 286k tok/s | ETA 13m
+iter   3200/5000 | loss 1.0932 | lr 2.29e-04 | 286k tok/s | ETA 13m
+iter   3250/5000 | loss 1.0808 | lr 2.20e-04 | 286k tok/s | ETA 13m
+iter   3300/5000 | loss 1.0933 | lr 2.10e-04 | 286k tok/s | ETA 12m
+iter   3350/5000 | loss 1.0625 | lr 2.01e-04 | 286k tok/s | ETA 12m
+iter   3400/5000 | loss 1.0330 | lr 1.91e-04 | 286k tok/s | ETA 11m
+iter   3450/5000 | loss 1.0245 | lr 1.82e-04 | 286k tok/s | ETA 11m
+iter   3500/5000 | loss 1.0375 | lr 1.73e-04 | 286k tok/s | ETA 11m
+iter   3550/5000 | loss 1.0336 | lr 1.65e-04 | 286k tok/s | ETA 10m
+iter   3600/5000 | loss 1.0574 | lr 1.56e-04 | 287k tok/s | ETA 10m
+iter   3650/5000 | loss 1.0527 | lr 1.48e-04 | 287k tok/s | ETA 10m
+iter   3700/5000 | loss 1.0374 | lr 1.40e-04 | 287k tok/s | ETA 9m
+iter   3750/5000 | loss 1.0009 | lr 1.32e-04 | 287k tok/s | ETA 9m
+iter   3800/5000 | loss 1.0566 | lr 1.24e-04 | 287k tok/s | ETA 9m
+iter   3850/5000 | loss 0.9996 | lr 1.17e-04 | 287k tok/s | ETA 8m
+iter   3900/5000 | loss 1.0240 | lr 1.10e-04 | 287k tok/s | ETA 8m
+iter   3950/5000 | loss 1.0311 | lr 1.03e-04 | 287k tok/s | ETA 7m
+iter   4000/5000 | loss 1.0223 | lr 9.65e-05 | 287k tok/s | ETA 7m
+  >> val loss 1.4551
+iter   4050/5000 | loss 1.0072 | lr 9.02e-05 | 286k tok/s | ETA 7m
+iter   4100/5000 | loss 0.9771 | lr 8.42e-05 | 286k tok/s | ETA 6m
+iter   4150/5000 | loss 1.0016 | lr 7.85e-05 | 286k tok/s | ETA 6m
+iter   4200/5000 | loss 1.0116 | lr 7.31e-05 | 286k tok/s | ETA 6m
+iter   4250/5000 | loss 0.9952 | lr 6.80e-05 | 286k tok/s | ETA 5m
+iter   4300/5000 | loss 1.0118 | lr 6.32e-05 | 286k tok/s | ETA 5m
+iter   4350/5000 | loss 0.9986 | lr 5.87e-05 | 286k tok/s | ETA 5m
+iter   4400/5000 | loss 0.9963 | lr 5.45e-05 | 286k tok/s | ETA 4m
+iter   4450/5000 | loss 1.0059 | lr 5.06e-05 | 286k tok/s | ETA 4m
+iter   4500/5000 | loss 0.9908 | lr 4.71e-05 | 286k tok/s | ETA 4m
+iter   4550/5000 | loss 0.9689 | lr 4.38e-05 | 286k tok/s | ETA 3m
+iter   4600/5000 | loss 0.9829 | lr 4.10e-05 | 286k tok/s | ETA 3m
+iter   4650/5000 | loss 1.0031 | lr 3.84e-05 | 286k tok/s | ETA 2m
+iter   4700/5000 | loss 1.0340 | lr 3.62e-05 | 286k tok/s | ETA 2m
+iter   4750/5000 | loss 0.9770 | lr 3.43e-05 | 287k tok/s | ETA 2m
+iter   4800/5000 | loss 1.0133 | lr 3.28e-05 | 287k tok/s | ETA 1m
+iter   4850/5000 | loss 1.0230 | lr 3.15e-05 | 287k tok/s | ETA 1m
+iter   4900/5000 | loss 0.9819 | lr 3.07e-05 | 287k tok/s | ETA 1m
+iter   4950/5000 | loss 1.0004 | lr 3.02e-05 | 287k tok/s | ETA 0m
+iter   4999/5000 | loss 1.0101 | lr 3.00e-05 | 287k tok/s | ETA 0m
+  >> val loss 1.4816
+done in 35.8m; checkpoints in runs/pretrain-25M/
+
+eval results:
+
+loaded runs/pretrain-25M/best.pt | 24.9M params | device=cuda | sampling 256 builds (max_new=1024, batch_size=256, temp=1)
+  generated 256 builds in 566s; scoring...
+  50/256 scored | 569s
+  100/256 scored | 572s
+  150/256 scored | 575s
+  200/256 scored | 577s
+  250/256 scored | 580s
+
+===== evaluation =====
+valid builds: 256/256 (100.0%) | connector-valid: 99.2% of them | unforced-EOS: 92.2%
+bricks/build: mean 33.8 median 8 range [1, 171]
+collision-free builds: 33.6%
+collision-free horizon: mean 3.7 median 2 steps (BrickNet bar ~20)  | ≥20: 1%  ≥50: 0%  ≥100: 0%
+per-step collision rate: @10=40%  @20=51%  @50=53%  @100=62%
+exported 16 .ldr builds for visual inspection
+[581s]
+
+hand-review of generated structures: seem messy, not close to something in real life.
+
+
+=== v1 model ===
+
+training results:
+
+device=cuda size=25M params=25.2M ctx=1024 batch=120x1 => 122880 tok/iter, 5000 iters => 614M tokens | use_pose=True
+iter      0/5000 | loss 10.1089 | lr 7.00e-06 | 139k tok/s | ETA 74m
+iter     50/5000 | loss 4.8416 | lr 3.57e-04 | 281k tok/s | ETA 36m
+iter    100/5000 | loss 2.8911 | lr 7.00e-04 | 284k tok/s | ETA 35m
+iter    150/5000 | loss 2.3854 | lr 7.00e-04 | 285k tok/s | ETA 35m
+iter    200/5000 | loss 2.0047 | lr 6.99e-04 | 285k tok/s | ETA 35m
+iter    250/5000 | loss 1.8783 | lr 6.98e-04 | 285k tok/s | ETA 34m
+iter    300/5000 | loss 1.7649 | lr 6.97e-04 | 285k tok/s | ETA 34m
+iter    350/5000 | loss 1.7033 | lr 6.96e-04 | 285k tok/s | ETA 33m
+iter    400/5000 | loss 1.6604 | lr 6.94e-04 | 285k tok/s | ETA 33m
+iter    450/5000 | loss 1.5967 | lr 6.92e-04 | 285k tok/s | ETA 33m
+iter    500/5000 | loss 1.5711 | lr 6.89e-04 | 285k tok/s | ETA 32m
+iter    550/5000 | loss 1.5358 | lr 6.86e-04 | 285k tok/s | ETA 32m
+iter    600/5000 | loss 1.5493 | lr 6.83e-04 | 285k tok/s | ETA 32m
+iter    650/5000 | loss 1.4544 | lr 6.79e-04 | 285k tok/s | ETA 31m
+iter    700/5000 | loss 1.4725 | lr 6.76e-04 | 286k tok/s | ETA 31m
+iter    750/5000 | loss 1.4151 | lr 6.71e-04 | 286k tok/s | ETA 30m
+iter    800/5000 | loss 1.4088 | lr 6.67e-04 | 286k tok/s | ETA 30m
+iter    850/5000 | loss 1.3790 | lr 6.62e-04 | 286k tok/s | ETA 30m
+iter    900/5000 | loss 1.3738 | lr 6.57e-04 | 286k tok/s | ETA 29m
+iter    950/5000 | loss 1.3340 | lr 6.51e-04 | 286k tok/s | ETA 29m
+iter   1000/5000 | loss 1.3786 | lr 6.46e-04 | 286k tok/s | ETA 29m
+  >> val loss 1.4911
+iter   1050/5000 | loss 1.3237 | lr 6.40e-04 | 281k tok/s | ETA 29m
+iter   1100/5000 | loss 1.3380 | lr 6.33e-04 | 281k tok/s | ETA 28m
+iter   1150/5000 | loss 1.2814 | lr 6.27e-04 | 281k tok/s | ETA 28m
+iter   1200/5000 | loss 1.2940 | lr 6.20e-04 | 281k tok/s | ETA 28m
+iter   1250/5000 | loss 1.2880 | lr 6.13e-04 | 281k tok/s | ETA 27m
+iter   1300/5000 | loss 1.2794 | lr 6.06e-04 | 282k tok/s | ETA 27m
+iter   1350/5000 | loss 1.2867 | lr 5.98e-04 | 282k tok/s | ETA 27m
+iter   1400/5000 | loss 1.2918 | lr 5.90e-04 | 282k tok/s | ETA 26m
+iter   1450/5000 | loss 1.2408 | lr 5.82e-04 | 282k tok/s | ETA 26m
+iter   1500/5000 | loss 1.2631 | lr 5.74e-04 | 282k tok/s | ETA 25m
+iter   1550/5000 | loss 1.2561 | lr 5.65e-04 | 282k tok/s | ETA 25m
+iter   1600/5000 | loss 1.2513 | lr 5.57e-04 | 282k tok/s | ETA 25m
+iter   1650/5000 | loss 1.2349 | lr 5.48e-04 | 282k tok/s | ETA 24m
+iter   1700/5000 | loss 1.2431 | lr 5.39e-04 | 283k tok/s | ETA 24m
+iter   1750/5000 | loss 1.2119 | lr 5.29e-04 | 283k tok/s | ETA 24m
+iter   1800/5000 | loss 1.2113 | lr 5.20e-04 | 283k tok/s | ETA 23m
+iter   1850/5000 | loss 1.2435 | lr 5.10e-04 | 283k tok/s | ETA 23m
+iter   1900/5000 | loss 1.2010 | lr 5.01e-04 | 283k tok/s | ETA 22m
+iter   1950/5000 | loss 1.2071 | lr 4.91e-04 | 283k tok/s | ETA 22m
+iter   2000/5000 | loss 1.1974 | lr 4.81e-04 | 283k tok/s | ETA 22m
+  >> val loss 1.4164
+iter   2050/5000 | loss 1.1857 | lr 4.71e-04 | 281k tok/s | ETA 22m
+iter   2100/5000 | loss 1.2023 | lr 4.60e-04 | 281k tok/s | ETA 21m
+iter   2150/5000 | loss 1.1826 | lr 4.50e-04 | 281k tok/s | ETA 21m
+iter   2200/5000 | loss 1.1863 | lr 4.40e-04 | 281k tok/s | ETA 20m
+iter   2250/5000 | loss 1.1583 | lr 4.29e-04 | 281k tok/s | ETA 20m
+iter   2300/5000 | loss 1.1680 | lr 4.18e-04 | 281k tok/s | ETA 20m
+iter   2350/5000 | loss 1.1545 | lr 4.08e-04 | 281k tok/s | ETA 19m
+iter   2400/5000 | loss 1.1410 | lr 3.97e-04 | 281k tok/s | ETA 19m
+iter   2450/5000 | loss 1.1365 | lr 3.86e-04 | 281k tok/s | ETA 19m
+iter   2500/5000 | loss 1.1526 | lr 3.76e-04 | 281k tok/s | ETA 18m
+iter   2550/5000 | loss 1.1339 | lr 3.65e-04 | 282k tok/s | ETA 18m
+iter   2600/5000 | loss 1.1244 | lr 3.54e-04 | 282k tok/s | ETA 17m
+iter   2650/5000 | loss 1.1113 | lr 3.44e-04 | 282k tok/s | ETA 17m
+iter   2700/5000 | loss 1.1225 | lr 3.33e-04 | 282k tok/s | ETA 17m
+iter   2750/5000 | loss 1.1143 | lr 3.22e-04 | 282k tok/s | ETA 16m
+iter   2800/5000 | loss 1.1073 | lr 3.12e-04 | 282k tok/s | ETA 16m
+iter   2850/5000 | loss 1.0790 | lr 3.01e-04 | 282k tok/s | ETA 16m
+iter   2900/5000 | loss 1.1085 | lr 2.90e-04 | 282k tok/s | ETA 15m
+iter   2950/5000 | loss 1.1295 | lr 2.80e-04 | 282k tok/s | ETA 15m
+iter   3000/5000 | loss 1.0377 | lr 2.70e-04 | 282k tok/s | ETA 15m
+  >> val loss 1.4380
+iter   3050/5000 | loss 1.0692 | lr 2.59e-04 | 281k tok/s | ETA 14m
+iter   3100/5000 | loss 1.0972 | lr 2.49e-04 | 281k tok/s | ETA 14m
+iter   3150/5000 | loss 1.0905 | lr 2.39e-04 | 281k tok/s | ETA 13m
+iter   3200/5000 | loss 1.0811 | lr 2.29e-04 | 281k tok/s | ETA 13m
+iter   3250/5000 | loss 1.0712 | lr 2.20e-04 | 281k tok/s | ETA 13m
+iter   3300/5000 | loss 1.0829 | lr 2.10e-04 | 281k tok/s | ETA 12m
+iter   3350/5000 | loss 1.0491 | lr 2.01e-04 | 281k tok/s | ETA 12m
+iter   3400/5000 | loss 1.0198 | lr 1.91e-04 | 281k tok/s | ETA 12m
+iter   3450/5000 | loss 1.0123 | lr 1.82e-04 | 281k tok/s | ETA 11m
+iter   3500/5000 | loss 1.0243 | lr 1.73e-04 | 281k tok/s | ETA 11m
+iter   3550/5000 | loss 1.0228 | lr 1.65e-04 | 281k tok/s | ETA 11m
+iter   3600/5000 | loss 1.0492 | lr 1.56e-04 | 281k tok/s | ETA 10m
+iter   3650/5000 | loss 1.0424 | lr 1.48e-04 | 281k tok/s | ETA 10m
+iter   3700/5000 | loss 1.0244 | lr 1.40e-04 | 281k tok/s | ETA 9m
+iter   3750/5000 | loss 0.9895 | lr 1.32e-04 | 281k tok/s | ETA 9m
+iter   3800/5000 | loss 1.0445 | lr 1.24e-04 | 282k tok/s | ETA 9m
+iter   3850/5000 | loss 0.9906 | lr 1.17e-04 | 282k tok/s | ETA 8m
+iter   3900/5000 | loss 1.0102 | lr 1.10e-04 | 282k tok/s | ETA 8m
+iter   3950/5000 | loss 1.0187 | lr 1.03e-04 | 282k tok/s | ETA 8m
+iter   4000/5000 | loss 1.0066 | lr 9.65e-05 | 282k tok/s | ETA 7m
+  >> val loss 1.4714
+iter   4050/5000 | loss 0.9933 | lr 9.02e-05 | 281k tok/s | ETA 7m
+iter   4100/5000 | loss 0.9603 | lr 8.42e-05 | 281k tok/s | ETA 7m
+iter   4150/5000 | loss 0.9900 | lr 7.85e-05 | 281k tok/s | ETA 6m
+iter   4200/5000 | loss 1.0033 | lr 7.31e-05 | 281k tok/s | ETA 6m
+iter   4250/5000 | loss 0.9836 | lr 6.80e-05 | 281k tok/s | ETA 5m
+iter   4300/5000 | loss 1.0001 | lr 6.32e-05 | 281k tok/s | ETA 5m
+iter   4350/5000 | loss 0.9846 | lr 5.87e-05 | 281k tok/s | ETA 5m
+iter   4400/5000 | loss 0.9857 | lr 5.45e-05 | 281k tok/s | ETA 4m
+iter   4450/5000 | loss 0.9927 | lr 5.06e-05 | 281k tok/s | ETA 4m
+iter   4500/5000 | loss 0.9750 | lr 4.71e-05 | 281k tok/s | ETA 4m
+iter   4550/5000 | loss 0.9603 | lr 4.38e-05 | 281k tok/s | ETA 3m
+iter   4600/5000 | loss 0.9693 | lr 4.10e-05 | 281k tok/s | ETA 3m
+iter   4650/5000 | loss 0.9912 | lr 3.84e-05 | 281k tok/s | ETA 3m
+iter   4700/5000 | loss 1.0169 | lr 3.62e-05 | 281k tok/s | ETA 2m
+iter   4750/5000 | loss 0.9619 | lr 3.43e-05 | 281k tok/s | ETA 2m
+iter   4800/5000 | loss 1.0027 | lr 3.28e-05 | 281k tok/s | ETA 1m
+iter   4850/5000 | loss 1.0054 | lr 3.15e-05 | 281k tok/s | ETA 1m
+iter   4900/5000 | loss 0.9704 | lr 3.07e-05 | 281k tok/s | ETA 1m
+iter   4950/5000 | loss 0.9868 | lr 3.02e-05 | 281k tok/s | ETA 0m
+iter   4999/5000 | loss 0.9987 | lr 3.00e-05 | 282k tok/s | ETA 0m
+  >> val loss 1.5061
+done in 36.5m; checkpoints in runs/pretrain-25M-v1/
+
+eval results:
+
+loaded runs/pretrain-25M-v1/best.pt | 25.2M params | device=cuda | sampling 256 builds (max_new=1024, batch_size=256, temp=1)
+  generated 256 builds in 606s; scoring...
+  50/256 scored | 609s
+  100/256 scored | 613s
+  150/256 scored | 617s
+  200/256 scored | 620s
+  250/256 scored | 622s
+
+===== evaluation =====
+valid builds: 256/256 (100.0%) | connector-valid: 98.8% of them | unforced-EOS: 90.2%
+bricks/build: mean 37.6 median 10 range [1, 171]
+collision-free builds: 30.1%
+collision-free horizon: mean 4.9 median 3 steps (BrickNet bar ~20)  | ≥20: 2%  ≥50: 0%  ≥100: 0%
+per-step collision rate: @10=44%  @20=52%  @50=44%  @100=52%
+exported 16 .ldr builds for visual inspection
+[622s]

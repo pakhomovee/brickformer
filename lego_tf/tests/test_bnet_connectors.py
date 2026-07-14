@@ -48,12 +48,14 @@ def _has_meshes():
 
 
 @pytest.mark.skipif(not _has_meshes(), reason="inset collision meshes not available")
-def test_collision_free_decoding_by_construction():
+@pytest.mark.parametrize("use_pose", [False, True])   # pose path keeps a per-token stream aligned
+def test_collision_free_decoding_by_construction(use_pose):
     """generate_batch_cf rejects+resamples colliding bricks, so every build is collision-free by
     construction: bricknet's own collision_free_prefix equals the part count for every stream."""
     from bricknet.score import collision_free_prefix
     v = Vocab()
-    cfg = ModelConfig(vocab_size=v.total, d_model=32, n_layers=2, n_heads=2, max_seq=128)
+    cfg = ModelConfig(vocab_size=v.total, d_model=32, n_layers=2, n_heads=2, max_seq=128,
+                      use_pose=use_pose)
     m = LegoGPT(cfg)                   # untrained: the collision scene must guarantee it regardless
     torch.manual_seed(0)
     streams = m.generate_batch_cf(v, 6, max_new=128, device="cpu", min_bricks=2, batch_size=6,

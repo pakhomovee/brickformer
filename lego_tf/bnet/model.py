@@ -321,6 +321,12 @@ class LegoGPT(nn.Module):
             # snapshot at the start of the current (in-progress) brick: (buf_len, gs_copy, attempts, pose)
             snap = [(1, copy.deepcopy(gs[r]), 0, ([0.0] * pdim if use_pose else None)) for r in range(B)]
 
+            def finish(r):        # end a build: append EOS and keep pose_hist 1:1 with buf (v1)
+                buf[r].append(vocab.EOS)
+                if use_pose:
+                    pose_hist[r].append(list(cur_pose[r]))
+                done[r] = True
+
             safety = cap * (max_retries + 2)
             for _ in range(safety):
                 if all(done):
@@ -366,8 +372,7 @@ class LegoGPT(nn.Module):
                             del buf[r][blen:]            # drop the partial in-progress brick
                             if use_pose:
                                 del pose_hist[r][blen:]
-                            buf[r].append(vocab.EOS)     # EOS only ever lands at a brick boundary
-                            done[r] = True
+                            finish(r)                    # EOS only ever lands at a brick boundary
                         continue
 
                     # a brick just completed -> resolve its world pose and test collision
@@ -397,8 +402,7 @@ class LegoGPT(nn.Module):
                         attempts += 1
                         snap[r] = (blen, gscopy, attempts, cpcopy)
                         if attempts > max_retries:       # give up on this brick -> end the build
-                            buf[r].append(vocab.EOS)
-                            done[r] = True
+                            finish(r)
                     else:
                         scene[r].add(pid, mat)
                         seen[r].add(key)
@@ -407,8 +411,7 @@ class LegoGPT(nn.Module):
                         snap[r] = (len(buf[r]), copy.deepcopy(gs[r]), 0,
                                    (list(cur_pose[r]) if use_pose else None))
                         if len(buf[r]) >= cap:
-                            buf[r].append(vocab.EOS)
-                            done[r] = True
+                            finish(r)
             streams.extend(buf)
         return streams
 
