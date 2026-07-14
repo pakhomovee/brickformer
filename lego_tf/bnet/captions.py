@@ -39,8 +39,15 @@ class CaptionEncoder:
     """Frozen mean-pooled sentence encoder. `dim` is the caption-embedding size (model.cond_dim)."""
 
     def __init__(self, model_id: str = DEFAULT_MODEL, device: str | None = None):
+        import os
+        os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "120")   # HF's 10s default aborts flaky links
+        try:
+            import hf_transfer  # noqa: F401  (robust resuming downloader, if installed)
+            os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
+        except Exception:
+            pass
         import torch
-        from transformers import AutoModel, AutoTokenizer
+        from transformers import AutoModel, AutoTokenizer   # model_id may be a HF id OR a local dir
         self.model_id = model_id
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.tok = AutoTokenizer.from_pretrained(model_id)
