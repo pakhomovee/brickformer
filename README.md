@@ -25,11 +25,15 @@ their DOF fully determine geometry via the catalog — no coordinate tokens. `tr
 structural layer (collision-free build-order sampling, brick-boundary truncation for the
 interactive-completion signal, unknown-colour coercion); `tokenizer.py` turns a tree into a
 **segmented integer token stream** and back (`Tree ↔ tokens`, reversible → `score_text`). Per
-brick: `PART COLOR` then, for non-root bricks, `PTR PSUB CSUB PCONN CCONN FAMILY <dof>` where DOF
-is family-specific (stud yaw · hinge flip+yaw · axle flip+yaw+slide · ball rx/ry/rz). Angles are
-integer degrees → 360 one-degree bins are exact, so the stream is discrete **and** losslessly
-reversible. **Verified on all 512 val graphs: structural round-trip exact, score-exact; vocab
-25,157; ~9 tokens/brick.** We train on **all** BrickNet data (no vehicle subset).
+brick: `PART COLOR` then, for non-root bricks, `PTR PCONN CCONN <dof>` where `PCONN`/`CCONN` are
+compact **flat connector indices** into each part's connector list (a small, per-part learnable
+target; the edge family + sub/conn fields are *derived* from the two connectors' kinds, so no
+`PSUB/CSUB/FAMILY` tokens) and DOF is family-specific (stud yaw · hinge flip+yaw · axle
+flip+yaw+slide · ball rx/ry/rz). The grammar masks `PTR/PCONN/CCONN` to real, mutually-compatible
+connectors, so **generation is connector-valid by construction**. Angles are integer degrees → 360
+one-degree bins are exact, so the stream is discrete **and** losslessly reversible. **Verified on
+all 512 val graphs: structural round-trip exact, score-exact; vocab 21,568; ~6 tokens/brick.** We
+train on **all** BrickNet data (no vehicle subset).
 
 `model.py` is a decoder-only transformer (LLaMA-style: RoPE, RMSNorm, SwiGLU) with
 grammar-constrained generation; `dataset.py` tokenizes a split into training sequences;

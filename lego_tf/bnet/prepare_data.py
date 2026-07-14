@@ -3,7 +3,7 @@
 We tokenize natively from the graphs, so only the compact `*.npz` files are needed -- never the
 large pre-serialized `paths_*.jsonl` text. Every connected component of every graph becomes one
 `BOS ... EOS` sequence; sequences are concatenated into one stream and written as uint16 (the
-25,157 vocab fits). A sidecar `<out>.meta.json` records counts AND the observed max of each
+~21.6k vocab fits). A sidecar `<out>.meta.json` records counts AND the observed max of each
 variable-size field, so you can confirm the vocab caps are big enough for a corpus (e.g. the full
 `pt` split) -- any structure that exceeds a cap is skipped and counted rather than crashing.
 
@@ -31,9 +31,10 @@ import numpy as np
 from bricknet.graph import _graph_from_arrays  # per-graph builder (same one load_graphs uses)
 
 from lego_tf.bnet import trees as T
+from lego_tf.bnet import connectors as K
 from lego_tf.bnet.tokenizer import Vocab, encode_tree
 
-_FIELDS = ("ptr", "psub", "csub", "pconn", "cconn", "slide_abs")
+_FIELDS = ("ptr", "pconn", "cconn", "slide_abs")
 
 
 def _extract_mmap(split: str, workdir: str) -> list[str]:
@@ -67,45 +68,52 @@ def _iter_graphs(a: dict, lo: int, hi: int):
 
 
 def _track(fm: dict, tree) -> None:
+    pids = [p.part_id for p in tree.parts]
     for e in tree.edges:
         fm["ptr"] = max(fm["ptr"], e.child - e.parent)
-        fm["psub"] = max(fm["psub"], int(e.parent_sub))
-        fm["csub"] = max(fm["csub"], int(e.child_sub))
-        fm["pconn"] = max(fm["pconn"], int(e.parent_conn))
-        fm["cconn"] = max(fm["cconn"], int(e.child_conn))
+        kp, kc = K.flat_indices(e, e.parent, e.child, pids[e.parent], pids[e.child])
+        fm["pconn"] = max(fm["pconn"], kp)   # flat connector indices (what encode_tree emits)
+        fm["cconn"] = max(fm["cconn"], kc)
         if hasattr(e, "slide"):
             fm["slide_abs"] = max(fm["slide_abs"], abs(int(e.slide)))
 
 
-def _encode_range(a: dict, lo: int, hi: int, out_bin: str, seed: int, collision_free: bool) -> dict:
+def _encode_range(a: dict, lo: int, hi: int, out_bin: str, seed: int, collision_free: bool,
+                  poses: bool = False) -> dict:
     vocab = Vocab()
     fm = {k: 0 for k in _FIELDS}
     nt = ns = nb = sk = 0
+    pose_f = open(out_bin + ".pose", "wb") if poses else None
     with open(out_bin, "wb") as f:
         for g in _iter_graphs(a, lo, hi):
             for c in range(len(g.components)):
                 try:
                     tree = T.sample_tree(g, component=c, seed=seed, collision_free=collision_free)
                     toks = encode_tree(tree, vocab)
+                    pfeat = T.pose_feature_rows(tree, toks, vocab) if poses else None
                 except Exception:
                     sk += 1
                     continue
                 _track(fm, tree)
                 np.asarray(toks, dtype=np.uint16).tofile(f)
+                if poses:  # aligned 1:1 with the token stream (rows == tokens)
+                    pfeat.astype(np.float16).tofile(pose_f)
                 nt += len(toks)
                 nb += len(tree.parts)
                 ns += 1
+    if pose_f is not None:
+        pose_f.close()
     return {"n_tokens": nt, "n_seqs": ns, "n_bricks": nb, "skipped": sk, "field_max": fm}
 
 
 def _worker(args) -> dict:
-    workdir, names, lo, hi, out_bin, seed, collision_free = args
+    workdir, names, lo, hi, out_bin, seed, collision_free, poses = args
     a = _open_mmap(workdir, names)
-    return _encode_range(a, lo, hi, out_bin, seed, collision_free)
+    return _encode_range(a, lo, hi, out_bin, seed, collision_free, poses)
 
 
 def prepare(split: str, out: str, *, seed: int = 0, collision_free: bool = True,
-            limit: int | None = None, workers: int | None = None) -> dict:
+            limit: int | None = None, workers: int | None = None, poses: bool = False) -> dict:
     vocab = Vocab()
     assert vocab.total < 65536, "vocab exceeds uint16"
     workers = workers or os.cpu_count() or 1
@@ -123,7 +131,7 @@ def prepare(split: str, out: str, *, seed: int = 0, collision_free: bool = True,
         # contiguous index shards -> one .bin part each
         bounds = [round(i * n / workers) for i in range(workers + 1)]
         parts = [f"{out}.part{i}" for i in range(workers)]
-        jobs = [(workdir, names, bounds[i], bounds[i + 1], parts[i], seed, collision_free)
+        jobs = [(workdir, names, bounds[i], bounds[i + 1], parts[i], seed, collision_free, poses)
                 for i in range(workers)]
 
         if workers == 1:
@@ -138,20 +146,29 @@ def prepare(split: str, out: str, *, seed: int = 0, collision_free: bool = True,
         n_bricks = sum(r["n_bricks"] for r in results)
         skipped = sum(r["skipped"] for r in results)
         field_max = {k: max(r["field_max"][k] for r in results) for k in _FIELDS}
-        with open(out, "wb") as dst:
-            for p in parts:
-                with open(p, "rb") as src:
-                    shutil.copyfileobj(src, dst, length=1 << 22)
-                os.remove(p)
+
+        def _concat(dst_path, suffix=""):
+            with open(dst_path, "wb") as dst:
+                for p in parts:
+                    with open(p + suffix, "rb") as src:
+                        shutil.copyfileobj(src, dst, length=1 << 22)
+                    os.remove(p + suffix)
+
+        _concat(out)                                   # token stream
+        if poses:
+            _concat(out + ".pose.f16", suffix=".pose")  # aligned pose stream (float16, n_tokens x 9)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
-    caps = {"ptr": vocab.size_of["PTR"], "psub": vocab.size_of["PSUB"], "csub": vocab.size_of["CSUB"],
+    caps = {"ptr": vocab.size_of["PTR"],
             "pconn": vocab.size_of["PCONN"], "cconn": vocab.size_of["CCONN"]}
     meta = {"split": split, "vocab_size": vocab.total, "n_tokens": n_tokens,
             "n_seqs": n_seqs, "n_bricks": n_bricks, "skipped": skipped,
             "tokens_per_brick": round(n_tokens / max(n_bricks, 1), 2),
             "field_max": field_max, "field_caps": caps}
+    if poses:
+        meta["pose_dim"] = T.POSE_DIM
+        meta["pose_bin"] = out + ".pose.f16"
     if skipped:
         print(f"WARNING: skipped {skipped} structures exceeding a vocab cap; field_max={field_max}")
     with open(out + ".meta.json", "w") as f:
@@ -169,9 +186,11 @@ def main():
     ap.add_argument("--random-order", action="store_true", help="random build order (default: collision-free)")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--workers", type=int, default=None, help="parallel processes (default: all CPU cores)")
+    ap.add_argument("--poses", action="store_true",
+                    help="also write an aligned <out>.pose.f16 resolved-pose stream (for v1 models)")
     a = ap.parse_args()
     prepare(a.split, a.out, seed=a.seed, collision_free=not a.random_order,
-            limit=a.limit, workers=a.workers)
+            limit=a.limit, workers=a.workers, poses=a.poses)
 
 
 if __name__ == "__main__":

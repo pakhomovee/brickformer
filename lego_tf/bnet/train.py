@@ -35,14 +35,27 @@ def load_bin(path: str) -> np.ndarray:
     return np.memmap(path, dtype=np.uint16, mode="r")
 
 
-def get_batch(data: np.ndarray, ctx: int, batch: int, device: str):
+def load_pose(path: str, dim: int) -> np.ndarray:
+    return np.memmap(path, dtype=np.float16, mode="r").reshape(-1, dim)
+
+
+def get_batch(data: np.ndarray, ctx: int, batch: int, device: str, pose: np.ndarray | None = None):
     ix = np.random.randint(0, len(data) - ctx - 1, size=batch)
     x = np.stack([data[i:i + ctx].astype(np.int64) for i in ix])
     y = np.stack([data[i + 1:i + 1 + ctx].astype(np.int64) for i in ix])
     x, y = torch.from_numpy(x), torch.from_numpy(y)
+    p = None
+    if pose is not None:  # pose row i aligns with input token i (same window as x)
+        p = torch.from_numpy(np.stack([pose[i:i + ctx] for i in ix]).astype(np.float32))
     if device == "cuda":
-        return x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
-    return x.to(device), y.to(device)
+        x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
+        if p is not None:
+            p = p.pin_memory().to(device, non_blocking=True)
+    else:
+        x, y = x.to(device), y.to(device)
+        if p is not None:
+            p = p.to(device)
+    return x, y, p
 
 
 def lr_at(it, warmup, max_iters, lr, min_lr):
@@ -55,13 +68,13 @@ def lr_at(it, warmup, max_iters, lr, min_lr):
 
 
 @torch.no_grad()
-def eval_loss(model, data, ctx, batch, device, iters=50):
+def eval_loss(model, data, ctx, batch, device, iters=50, pose=None):
     model.eval()
     losses = []
     for _ in range(iters):
-        x, y = get_batch(data, ctx, batch, device)
+        x, y, p = get_batch(data, ctx, batch, device, pose=pose)
         with torch.autocast(device_type=device.split(":")[0], dtype=torch.bfloat16, enabled=(device == "cuda")):
-            _, loss = model(x, targets=y)
+            _, loss = model(x, targets=y, pose=p)
         losses.append(loss.item())
     model.train()
     return sum(losses) / len(losses)
@@ -69,7 +82,8 @@ def eval_loss(model, data, ctx, batch, device, iters=50):
 
 def train(train_bin, val_bin, out, size="25M", ctx=1024, batch=32, grad_accum=1,
           lr=3e-4, min_lr=3e-5, max_iters=20000, warmup=None, eval_every=1000,
-          weight_decay=0.1, device=None, seed=0):
+          weight_decay=0.1, device=None, seed=0, use_pose=False, pose_bin=None,
+          val_pose_bin=None, pose_dim=9):
     torch.manual_seed(seed)
     np.random.seed(seed)
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -78,15 +92,24 @@ def train(train_bin, val_bin, out, size="25M", ctx=1024, batch=32, grad_accum=1,
 
     vocab = Vocab()
     d, L, H = SIZES[size]
-    cfg = ModelConfig(vocab_size=vocab.total, d_model=d, n_layers=L, n_heads=H, max_seq=ctx)
+    cfg = ModelConfig(vocab_size=vocab.total, d_model=d, n_layers=L, n_heads=H, max_seq=ctx,
+                      use_pose=use_pose, pose_dim=pose_dim)
     model = LegoGPT(cfg).to(device)
     tok_per_iter = batch * grad_accum * ctx
     print(f"device={device} size={size} params={model.num_params()/1e6:.1f}M "
           f"ctx={ctx} batch={batch}x{grad_accum} => {tok_per_iter} tok/iter, "
-          f"{max_iters} iters => {tok_per_iter*max_iters/1e6:.0f}M tokens")
+          f"{max_iters} iters => {tok_per_iter*max_iters/1e6:.0f}M tokens | use_pose={use_pose}")
 
     train_data = load_bin(train_bin)
     val_data = load_bin(val_bin) if val_bin and os.path.exists(val_bin) else None
+    train_pose = val_pose = None
+    if use_pose:
+        pose_bin = pose_bin or (train_bin + ".pose.f16")
+        val_pose_bin = val_pose_bin or ((val_bin + ".pose.f16") if val_bin else None)
+        train_pose = load_pose(pose_bin, pose_dim)
+        assert len(train_pose) == len(train_data), "pose stream not aligned with token stream"
+        if val_data is not None and val_pose_bin and os.path.exists(val_pose_bin):
+            val_pose = load_pose(val_pose_bin, pose_dim)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, betas=(0.9, 0.95), weight_decay=weight_decay)
 
     t0 = time.time()
@@ -97,9 +120,9 @@ def train(train_bin, val_bin, out, size="25M", ctx=1024, batch=32, grad_accum=1,
         opt.zero_grad(set_to_none=True)
         loss_acc = 0.0
         for _ in range(grad_accum):
-            x, y = get_batch(train_data, ctx, batch, device)
+            x, y, p = get_batch(train_data, ctx, batch, device, pose=train_pose)
             with torch.autocast(device_type=device.split(":")[0], dtype=torch.bfloat16, enabled=(device == "cuda")):
-                _, loss = model(x, targets=y)
+                _, loss = model(x, targets=y, pose=p)
             (loss / grad_accum).backward()
             loss_acc += loss.item() / grad_accum
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -113,7 +136,7 @@ def train(train_bin, val_bin, out, size="25M", ctx=1024, batch=32, grad_accum=1,
                   f"| {tps/1e3:.0f}k tok/s | ETA {eta/60:.0f}m")
 
         if val_data is not None and (it % eval_every == 0 and it > 0 or it == max_iters - 1):
-            vl = eval_loss(model, val_data, ctx, batch, device)
+            vl = eval_loss(model, val_data, ctx, batch, device, pose=val_pose)
             print(f"  >> val loss {vl:.4f}")
             if vl < best_val:
                 best_val = vl
@@ -141,9 +164,14 @@ def main():
     ap.add_argument("--max-iters", type=int, default=20000)
     ap.add_argument("--eval-every", type=int, default=1000)
     ap.add_argument("--device", default=None)
+    ap.add_argument("--use-pose", action="store_true", help="v1: add resolved-pose input embeddings")
+    ap.add_argument("--pose-bin", default=None, help="pose stream (default: <train>.pose.f16)")
+    ap.add_argument("--val-pose-bin", default=None, help="val pose stream (default: <val>.pose.f16)")
+    ap.add_argument("--pose-dim", type=int, default=9)
     a = ap.parse_args()
     train(a.train, a.val, a.out, size=a.size, ctx=a.ctx, batch=a.batch, grad_accum=a.grad_accum,
-          lr=a.lr, max_iters=a.max_iters, eval_every=a.eval_every, device=a.device)
+          lr=a.lr, max_iters=a.max_iters, eval_every=a.eval_every, device=a.device,
+          use_pose=a.use_pose, pose_bin=a.pose_bin, val_pose_bin=a.val_pose_bin, pose_dim=a.pose_dim)
 
 
 if __name__ == "__main__":

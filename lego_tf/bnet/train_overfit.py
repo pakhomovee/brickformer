@@ -22,7 +22,7 @@ def run(n=64, steps=400, d_model=128, n_layers=4, n_heads=4, batch=4, lr=3e-4,
         split="data/val.npz", seed=0, device="cpu", max_len=200):
     torch.manual_seed(seed)
     vocab = Vocab()
-    # pool then keep the n shortest structures under max_len (bounds CPU memory: the 25,157-wide
+    # pool then keep the n shortest structures under max_len (bounds CPU memory: the ~21.6k-wide
     # logits over long sequences are the hog on this box).
     pool = tokenize_split(split, vocab, limit=max(n * 6, 128), seed=seed)
     pool = sorted((s for s in pool if len(s) <= max_len), key=len)[:n]

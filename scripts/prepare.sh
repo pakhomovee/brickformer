@@ -33,9 +33,10 @@ for npz in $SPLITS; do
 done
 
 WORKER_ARG=""; [ -n "$WORKERS" ] && WORKER_ARG="--workers $WORKERS"
+POSE_ARG=""; [ -n "${POSES:-}" ] && POSE_ARG="--poses"   # also emit aligned .pose.f16 (v1 models)
 echo ">> tokenizing pretrain split -> data/pretrain.bin (mmap streaming, all cores)"
-python -m lego_tf.bnet.prepare_data --split data/pt.npz  --out data/pretrain.bin $WORKER_ARG
+python -m lego_tf.bnet.prepare_data --split data/pt.npz  --out data/pretrain.bin $WORKER_ARG $POSE_ARG
 echo ">> tokenizing val split -> data/val.bin"
-python -m lego_tf.bnet.prepare_data --split data/val.npz --out data/val.bin $WORKER_ARG
+python -m lego_tf.bnet.prepare_data --split data/val.npz --out data/val.bin $WORKER_ARG $POSE_ARG
 
 echo ">> prepare done. Next:  bash scripts/train.sh"

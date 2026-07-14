@@ -48,13 +48,13 @@ def _edges_key(edges):
 
 
 def test_vocab_layout_is_consistent(vocab):
-    assert vocab.total == 25157
+    assert vocab.total == 21568
     # gid / split are inverse
-    for seg in ("PART", "COLOR", "PTR", "FAMILY", "ANGLE", "SLIDE"):
+    for seg in ("PART", "COLOR", "PTR", "PCONN", "CCONN", "ANGLE", "SLIDE"):
         g = vocab.gid(seg, 0)
         assert vocab.seg_of(g) == seg and vocab.local(g, seg) == 0
     with pytest.raises(ValueError):
-        vocab.gid("FAMILY", 99)
+        vocab.gid("FLIP", 99)   # FLIP has size 2 -> local 99 is out of range
 
 
 def test_structural_roundtrip_all_val(vocab, graphs):
@@ -85,4 +85,4 @@ def test_score_roundtrip_sample(vocab, graphs):
 def test_token_density_reasonable(vocab, graphs):
     ntok = sum(len(encode_tree(T.sample_tree(g, seed=0), vocab)) for g in graphs[:50])
     nbrick = sum(len(g.part_ids) for g in graphs[:50])
-    assert 6 <= ntok / nbrick <= 12  # ~9 tok/brick
+    assert 5 <= ntok / nbrick <= 8  # ~6 tok/brick (compact flat connectors; was ~9)

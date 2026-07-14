@@ -104,8 +104,9 @@ python -m lego_tf.bnet.evaluate --ckpt runs/pretrain-25M/best.pt --n 256 --expor
 Reports (and writes `runs/eval/eval.json` + `collision_curve.csv` + sample `.ldr` files):
 
 - **validity** — fraction that decode to a build (grammar-constrained, so ~100%).
-- **connector-valid** — fraction whose (part, connector) pairs physically realize. Climbs toward
-  100% as the model learns; near 0% means undertrained.
+- **connector-valid** — fraction whose (part, connector) pairs physically realize. The grammar
+  masks connectors to compatible ones, so this is **~100% by construction** (a sanity check on the
+  masking, not a learning signal); a build that names a non-attachable part is truncated there.
 - **collision-free rate** and **collision-free horizon** — longest collision-free placement prefix
   per build. **BrickNet's implied bar is ~20 steps** — beating it is the M1 gate.
 - **per-step collision curve** — collision rate vs sequence position (the architecture signal).
@@ -114,6 +115,27 @@ Reports (and writes `runs/eval/eval.json` + `collision_curve.csv` + sample `.ldr
 Open the exported `runs/eval/sample_*.ldr` in any LDraw viewer (Studio, LeoCAD, or an online
 viewer) to eyeball the builds. Drop `--export`/set `--no-collision` for a quick parse-only check
 without meshes.
+
+## 8. v1 resolved-pose ablation (optional)
+
+v1 feeds each token the resolved world pose of the *previously placed* brick (translation + 6D
+rotation, Fourier-featured) so overlap is directly visible to attention — targeting the collision
+horizon. Tokens are unchanged, so it's a clean v0-vs-v1 comparison.
+
+```bash
+# 1. add the aligned pose stream to the prepared data (writes data/*.bin.pose.f16):
+POSES=1 bash scripts/prepare.sh                 # or: prepare_data ... --poses
+
+# 2. train v1 with the SAME recipe as v0 (only variable = pose). Output: runs/pretrain-25M-v1/
+USE_POSE=1 bash scripts/train.sh                 # add the same --batch/--ctx/--max-iters/--lr you used for v0
+
+# 3. evaluate v1 (generation auto-resolves poses) and compare curves to v0:
+python -m lego_tf.bnet.evaluate --ckpt runs/pretrain-25M-v1/best.pt --n 256 --export runs/eval-v1
+```
+
+**M2 gate:** v1's per-step collision curve is flatter and its collision-free horizon moves
+meaningfully past v0 / the ~20-step bar. Note: v1 generation is slower (it resolves each brick's
+pose incrementally); lower `--n` or `--max-new` if needed.
 
 ---
 

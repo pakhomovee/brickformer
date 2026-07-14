@@ -13,7 +13,10 @@ import dataclasses
 import functools
 
 import bricknet
+import numpy as np
 from bricknet.core import Tree
+
+POSE_DIM = 9  # per-token resolved-pose feature: translation (3) + rotation 6D (first two columns)
 
 
 @functools.lru_cache(maxsize=1)
@@ -68,3 +71,39 @@ def truncate_tree(tree, k: int):
     parts = tree.parts[:k]
     edges = tuple(e for e in tree.edges if e.parent < k and e.child < k)
     return Tree(parts=parts, edges=edges)
+
+
+def resolve_poses(tree):
+    """Resolved world pose (4x4) of each brick, aligned to `tree.parts`; None if the tree's
+    connectors don't realize as geometry (catalog-only -- no collision meshes needed)."""
+    try:
+        mats = bricknet.decode_graph(bricknet.tree_to_graph(tree))
+    except Exception:
+        return None
+    return np.stack([np.asarray(m, dtype=np.float32) for m in mats])  # (N, 4, 4)
+
+
+def _pose_feat(mat) -> np.ndarray:
+    """4x4 world matrix -> 9-float feature: translation + rotation 6D (first two columns)."""
+    return np.concatenate([mat[:3, 3], mat[:3, 0], mat[:3, 1]]).astype(np.float32)
+
+
+def pose_feature_rows(tree, toks, vocab) -> np.ndarray:
+    """Per-token pose feature aligned to `toks` (which must be encode_tree(tree)): each token of
+    brick i carries the resolved pose of the PREVIOUS brick, P[i-1] (zeros for BOS and the root's
+    tokens). Leak-free (a brick's own pose never sits on its own tokens) and inference-consistent
+    (P[i-1] is known once brick i-1 is placed). Returns float32 (len(toks), POSE_DIM); all zeros if
+    the tree's poses can't be resolved."""
+    from lego_tf.bnet.tokenizer import GrammarState  # local: tokenizer imports trees.coerce_colors
+
+    feats = np.zeros((len(toks), POSE_DIM), dtype=np.float32)
+    poses = resolve_poses(tree)
+    if poses is None:
+        return feats
+    gs = GrammarState(vocab)                       # started AFTER BOS, like generation
+    for t in range(1, len(toks)):                  # toks[0] is BOS -> row stays zero
+        nb = gs.n_bricks                           # bricks completed BEFORE this token
+        if nb >= 1:
+            feats[t] = _pose_feat(poses[nb - 1])
+        gs.step(toks[t])
+    return feats
