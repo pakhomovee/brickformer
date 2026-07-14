@@ -43,21 +43,38 @@ def load_model(ckpt_path: str, device: str):
     model = LegoGPT(cfg).to(device)
     model.load_state_dict(ckpt["model"])
     model.eval()
-    return model, cfg
+    return model, cfg, ckpt
+
+
+def _encode_prompt(prompt: str, ckpt: dict, caps_model: str | None, device: str):
+    """Embed a caption prompt with the same frozen encoder used for SFT -> (cond_dim,) vector."""
+    from lego_tf.bnet.captions import CaptionEncoder, DEFAULT_MODEL
+    model_id = caps_model or ckpt.get("caps_model") or DEFAULT_MODEL
+    enc = CaptionEncoder(model_id, device=device)
+    return enc.encode([prompt])[0]
 
 
 def evaluate(ckpt: str, *, n: int = 256, device: str | None = None, seed: int = 0,
              greedy: bool = False, min_bricks: int = 2, max_new: int | None = None,
              collision: bool = True, export: str | None = None, export_n: int = 16,
              curve_len: int = 128, batch_size: int = 64, collision_free: bool = False,
-             max_retries: int = 8, temperature: float = 1.0) -> dict:
+             max_retries: int = 8, temperature: float = 1.0, prompt: str | None = None,
+             cfg_weight: float = 1.0, caps_model: str | None = None) -> dict:
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(seed)
     vocab = Vocab()
-    model, cfg = load_model(ckpt, device)
+    model, cfg, ckpt_d = load_model(ckpt, device)
     cap = max_new or cfg.max_seq
+    cond = None
+    if prompt is not None:
+        if not cfg.cond_dim:
+            print("  (warning: checkpoint is unconditional -- ignoring --prompt)")
+        else:
+            cond = _encode_prompt(prompt, ckpt_d, caps_model, device)
     mode = (f"collision-free decoding (reject+resample, max_retries={max_retries}, temp={temperature})"
             if collision_free else ("greedy" if greedy else "temp=1"))
+    if cond is not None:
+        mode += f" | prompt={prompt!r} cfg_weight={cfg_weight}"
     print(f"loaded {ckpt} | {model.num_params()/1e6:.1f}M params | device={device} | "
           f"sampling {n} builds (max_new={cap}, batch_size={batch_size}, {mode})")
 
@@ -73,10 +90,12 @@ def evaluate(ckpt: str, *, n: int = 256, device: str | None = None, seed: int = 
     if collision_free:
         streams = model.generate_batch_cf(vocab, n, max_new=cap, device=device,
                                           min_bricks=min_bricks, batch_size=batch_size,
-                                          max_retries=max_retries, temperature=temperature)
+                                          max_retries=max_retries, temperature=temperature,
+                                          cond=cond, cfg_weight=cfg_weight)
     else:
         streams = model.generate_batch(vocab, n, max_new=cap, device=device, greedy=greedy,
-                                       min_bricks=min_bricks, batch_size=batch_size)
+                                       min_bricks=min_bricks, batch_size=batch_size,
+                                       cond=cond, cfg_weight=cfg_weight)
     print(f"  generated {n} builds in {time.time()-t0:.0f}s; scoring...")
     for i, toks in enumerate(streams):
         natural_eos += int(toks[-1] == vocab.EOS)
@@ -122,6 +141,9 @@ def evaluate(ckpt: str, *, n: int = 256, device: str | None = None, seed: int = 
                  "validity_rate": round(valid / n, 4) if n else 0.0,
                  "connector_valid_rate": round(graph_ok / valid, 4) if valid else 0.0,
                  "unforced_eos_rate": round(natural_eos / n, 4) if n else 0.0}
+    if cond is not None:
+        rep["prompt"] = prompt
+        rep["cfg_weight"] = cfg_weight
     if m:
         rep["bricks"] = {"mean": round(sum(n_bricks) / m, 1), "median": int(st.median(n_bricks)),
                          "min": min(n_bricks), "max": max(n_bricks)}
@@ -208,11 +230,15 @@ def main():
                          "is collision-free by construction (needs inset meshes; sampling only)")
     ap.add_argument("--max-retries", type=int, default=8, help="resample attempts per brick before ending the build")
     ap.add_argument("--temperature", type=float, default=1.0, help="sampling temperature (collision-free mode)")
+    ap.add_argument("--prompt", default=None, help="caption to condition on (SFT checkpoints only)")
+    ap.add_argument("--cfg-weight", type=float, default=1.0, help="classifier-free guidance weight (>1 = stronger)")
+    ap.add_argument("--caps-model", default=None, help="override the caption encoder id (default: ckpt's)")
     a = ap.parse_args()
     evaluate(a.ckpt, n=a.n, device=a.device, seed=a.seed, greedy=a.greedy,
              min_bricks=a.min_bricks, max_new=a.max_new, collision=not a.no_collision,
              export=a.export, export_n=a.export_n, batch_size=a.batch_size,
-             collision_free=a.collision_free, max_retries=a.max_retries, temperature=a.temperature)
+             collision_free=a.collision_free, max_retries=a.max_retries, temperature=a.temperature,
+             prompt=a.prompt, cfg_weight=a.cfg_weight, caps_model=a.caps_model)
 
 
 if __name__ == "__main__":

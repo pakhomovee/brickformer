@@ -157,6 +157,42 @@ python -m lego_tf.bnet.evaluate --ckpt runs/pretrain-25M-v1/best.pt --n 256 --ex
 meaningfully past v0 / the ~20-step bar. Note: v1 generation is slower (it resolves each brick's
 pose incrementally); lower `--n` or `--max-new` if needed.
 
+## 9. Caption-conditioned SFT (text -> build)
+
+The pretrained model is **unconditional** — it generates the average of all BrickNet, which reads as
+incoherent. SFT teaches it the **caption -> build** mapping so you can prompt it. A caption is
+embedded by a frozen sentence encoder, projected, and prepended as a prefix the decoder attends to;
+**classifier-free guidance** (random caption dropout in training, a `--cfg-weight` knob at inference)
+controls how strongly it obeys the prompt. This is a short fine-tune from the pretrained checkpoint
+(~10–25 min on A100), not a retrain — it reuses all the learned structure.
+
+```bash
+INIT=weights/brickformer_25M_v0_fix.pt bash scripts/sft.sh     # installs the encoder, embeds captions, fine-tunes
+```
+
+That runs three steps (also runnable by hand):
+
+```bash
+pip install -r requirements-sft.txt                            # frozen text encoder (transformers)
+python -m lego_tf.bnet.captions --split data/sft.npz --captions data/captions_sft.jsonl --out data/sft
+python -m lego_tf.bnet.train_sft --split data/sft.npz --caps data/sft \
+    --init weights/brickformer_25M_v0_fix.pt --out runs/sft-25M --max-iters 2000
+```
+
+Then **prompt it** (conditioning composes with the collision-free decoder):
+
+```bash
+python -m lego_tf.bnet.evaluate --ckpt runs/sft-25M/best.pt --n 16 --collision-free \
+    --prompt "a small red race car" --cfg-weight 4 --min-bricks 8 --export runs/eval-sft
+```
+
+Sweep `--cfg-weight` (1 = plain conditional, 3–7 = stronger adherence) and eyeball
+`runs/eval-sft/sample_*.ldr`. **The question this answers: does prompting produce the described
+object?** If category/gist control works but fine attributes don't, the next steps are per-word
+conditioning (richer than the pooled MVP) and/or a larger model. Notes: this is the *pooled* MVP
+(one caption vector); the encoder is `sentence-transformers/all-MiniLM-L6-v2` (384-d) by default and
+runs only on the SFT/eval box.
+
 ---
 
 ## Reference: time & GPU
