@@ -38,6 +38,12 @@ except Exception:                                    # pragma: no cover
 
 
 def load_model(ckpt_path: str, device: str):
+    # a Track-B (LLM backbone) checkpoint is a directory with lego_llm.json (adapter + lego_embed)
+    if os.path.isdir(ckpt_path) and os.path.exists(os.path.join(ckpt_path, "lego_llm.json")):
+        from lego_tf.bnet.llm_backbone import LegoLLM
+        model = LegoLLM.load(ckpt_path, device=device)
+        model.eval()
+        return model, model.cfg, {"is_llm": True}
     ckpt = torch.load(ckpt_path, map_location=device)
     cfg = ModelConfig(**ckpt["cfg"])
     model = LegoGPT(cfg).to(device)
@@ -67,7 +73,9 @@ def evaluate(ckpt: str, *, n: int = 256, device: str | None = None, seed: int = 
     cap = max_new or cfg.max_seq
     cond = None
     if prompt is not None:
-        if not cfg.cond_dim:
+        if ckpt_d.get("is_llm"):
+            cond = model.encode_prompt(prompt)          # backbone-tokenized caption text prefix
+        elif not cfg.cond_dim:
             print("  (warning: checkpoint is unconditional -- ignoring --prompt)")
         else:
             cond = _encode_prompt(prompt, ckpt_d, caps_model, device)
