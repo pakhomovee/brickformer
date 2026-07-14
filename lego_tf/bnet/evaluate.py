@@ -49,15 +49,17 @@ def load_model(ckpt_path: str, device: str):
 def evaluate(ckpt: str, *, n: int = 256, device: str | None = None, seed: int = 0,
              greedy: bool = False, min_bricks: int = 2, max_new: int | None = None,
              collision: bool = True, export: str | None = None, export_n: int = 16,
-             curve_len: int = 128, batch_size: int = 64) -> dict:
+             curve_len: int = 128, batch_size: int = 64, collision_free: bool = False,
+             max_retries: int = 8, temperature: float = 1.0) -> dict:
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(seed)
     vocab = Vocab()
     model, cfg = load_model(ckpt, device)
     cap = max_new or cfg.max_seq
+    mode = (f"collision-free decoding (reject+resample, max_retries={max_retries}, temp={temperature})"
+            if collision_free else ("greedy" if greedy else "temp=1"))
     print(f"loaded {ckpt} | {model.num_params()/1e6:.1f}M params | device={device} | "
-          f"sampling {n} builds (max_new={cap}, batch_size={batch_size}, "
-          f"{'greedy' if greedy else 'temp=1'})")
+          f"sampling {n} builds (max_new={cap}, batch_size={batch_size}, {mode})")
 
     do_coll = collision and _HAVE_SCORE
     meshes_missing = False
@@ -68,8 +70,13 @@ def evaluate(ckpt: str, *, n: int = 256, device: str | None = None, seed: int = 
     coll_seen = [0] * curve_len          # samples that reached position k
 
     t0 = time.time()
-    streams = model.generate_batch(vocab, n, max_new=cap, device=device, greedy=greedy,
-                                   min_bricks=min_bricks, batch_size=batch_size)
+    if collision_free:
+        streams = model.generate_batch_cf(vocab, n, max_new=cap, device=device,
+                                          min_bricks=min_bricks, batch_size=batch_size,
+                                          max_retries=max_retries, temperature=temperature)
+    else:
+        streams = model.generate_batch(vocab, n, max_new=cap, device=device, greedy=greedy,
+                                       min_bricks=min_bricks, batch_size=batch_size)
     print(f"  generated {n} builds in {time.time()-t0:.0f}s; scoring...")
     for i, toks in enumerate(streams):
         natural_eos += int(toks[-1] == vocab.EOS)
@@ -196,10 +203,16 @@ def main():
     ap.add_argument("--export", default=None, help="dir to write sample .ldr + eval.json + curve.csv")
     ap.add_argument("--export-n", type=int, default=16)
     ap.add_argument("--batch-size", type=int, default=64, help="builds generated in parallel on the GPU")
+    ap.add_argument("--collision-free", action="store_true",
+                    help="collision-aware decoding: reject+resample colliding bricks so every build "
+                         "is collision-free by construction (needs inset meshes; sampling only)")
+    ap.add_argument("--max-retries", type=int, default=8, help="resample attempts per brick before ending the build")
+    ap.add_argument("--temperature", type=float, default=1.0, help="sampling temperature (collision-free mode)")
     a = ap.parse_args()
     evaluate(a.ckpt, n=a.n, device=a.device, seed=a.seed, greedy=a.greedy,
              min_bricks=a.min_bricks, max_new=a.max_new, collision=not a.no_collision,
-             export=a.export, export_n=a.export_n, batch_size=a.batch_size)
+             export=a.export, export_n=a.export_n, batch_size=a.batch_size,
+             collision_free=a.collision_free, max_retries=a.max_retries, temperature=a.temperature)
 
 
 if __name__ == "__main__":

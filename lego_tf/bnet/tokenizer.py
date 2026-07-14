@@ -315,8 +315,8 @@ def decode(tokens: list[int], vocab: Vocab):
             break
         try:
             part, edge, ok = parse_brick(gid)
-        except StopIteration:
-            break  # truncated trailing brick -> drop it
+        except (StopIteration, ValueError):
+            break  # truncated or malformed trailing brick (e.g. EOS mid-brick) -> drop it
         if not ok:
             break  # brick can't form an aligned edge -> truncate here (keeps edge<->part alignment)
         parts.append(part)

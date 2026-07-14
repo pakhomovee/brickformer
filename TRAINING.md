@@ -116,6 +116,26 @@ Open the exported `runs/eval/sample_*.ldr` in any LDraw viewer (Studio, LeoCAD, 
 viewer) to eyeball the builds. Drop `--export`/set `--no-collision` for a quick parse-only check
 without meshes.
 
+### Collision-free decoding (the M2 upper bound)
+
+Pure next-token sampling collides constantly (horizon ~2–5) because the loss never penalizes
+overlap. `--collision-free` adds a per-build collision scene (bricknet's mesh checker): when a
+sampled brick would interpenetrate the structure, its tokens are rolled back and the brick is
+**resampled** (up to `--max-retries`, default 8); on exhaustion the build ends. Every build is then
+**collision-free by construction** — `collision-free builds` and `horizon ≥N` should read ~100%.
+
+```bash
+python -m lego_tf.bnet.evaluate --ckpt runs/pretrain-25M/best.pt --n 256 \
+    --collision-free --temperature 1.0 --export runs/eval-cf
+```
+
+This answers the key question directly: **once we force collision-free, do the structures actually
+look like vehicles?** Compare `runs/eval-cf/sample_*.ldr` (constrained) against the plain
+`runs/eval/sample_*.ldr`. Needs the inset meshes; sampling only (greedy can't escape a rejection),
+and it's slower than plain decoding (a geometry check per brick, plus retries). If the forced
+builds still look wrong, the fix is a training signal (DPO on the collision/realism scorer), not
+just decoding — this eval sets that ceiling.
+
 ## 8. v1 resolved-pose ablation (optional)
 
 v1 feeds each token the resolved world pose of the *previously placed* brick (translation + 6D

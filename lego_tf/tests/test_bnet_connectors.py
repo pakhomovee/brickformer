@@ -39,6 +39,35 @@ def test_masks_are_mutually_consistent():
     assert checked > 0, "expected some compatible connector pairs among the first parts"
 
 
+def _has_meshes():
+    try:
+        from bricknet.collision import data_dir
+        return (data_dir() / "inset").is_dir()
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _has_meshes(), reason="inset collision meshes not available")
+def test_collision_free_decoding_by_construction():
+    """generate_batch_cf rejects+resamples colliding bricks, so every build is collision-free by
+    construction: bricknet's own collision_free_prefix equals the part count for every stream."""
+    from bricknet.score import collision_free_prefix
+    v = Vocab()
+    cfg = ModelConfig(vocab_size=v.total, d_model=32, n_layers=2, n_heads=2, max_seq=128)
+    m = LegoGPT(cfg)                   # untrained: the collision scene must guarantee it regardless
+    torch.manual_seed(0)
+    streams = m.generate_batch_cf(v, 6, max_new=128, device="cpu", min_bricks=2, batch_size=6,
+                                  max_retries=6, temperature=1.0)
+    n = 0
+    for toks in streams:
+        tree = decode(toks, v)
+        if not tree.parts:
+            continue
+        n += 1
+        assert collision_free_prefix(tree) == len(tree.parts)   # no collision anywhere in the build
+    assert n > 0
+
+
 def test_generation_is_connector_valid_by_construction():
     """An untrained model, constrained only by the connector-aware grammar, must still produce
     100%-connector-valid builds: every decoded tree passes tree_to_graph without raising."""

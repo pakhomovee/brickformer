@@ -199,6 +199,21 @@ class LegoGPT(nn.Module):
         return self.head(self.norm(x[:, -1:, :]))[:, -1, :]
 
     @torch.no_grad()
+    def _gathered_logits(self, ids, gidx, pose=None):
+        """Logits at each row's own position `gidx[r]` -- (B, vocab). Lets rows be right-padded to
+        different real lengths (needed when rows roll back independently) without materializing the
+        (B, T, vocab) tensor: gather the hidden state at gidx, then apply the head."""
+        dh = self.cfg.d_model // self.cfg.n_heads
+        cos, sin = _rope_cache(ids.shape[1], dh, self.cfg.rope_base, ids.device)
+        x = self.tok(ids)
+        if self.pose_embed is not None and pose is not None:
+            x = x + self.pose_embed(pose)
+        for b in self.blocks:
+            x = b(x, cos, sin)
+        h = x[torch.arange(ids.shape[0], device=ids.device), gidx]   # (B, D) -- each row's last real token
+        return self.head(self.norm(h))
+
+    @torch.no_grad()
     def generate_batch(self, vocab: Vocab, n: int, max_new: int | None = None, device="cpu",
                        greedy: bool = False, min_bricks: int = 1, batch_size: int = 64,
                        resolve_pose=None):
@@ -263,6 +278,138 @@ class LegoGPT(nn.Module):
                 if all(done):
                     break
             streams.extend(out)
+        return streams
+
+    @torch.no_grad()
+    def generate_batch_cf(self, vocab: Vocab, n: int, max_new: int | None = None, device="cpu",
+                          min_bricks: int = 1, batch_size: int = 64, max_retries: int = 8,
+                          temperature: float = 1.0):
+        """Collision-aware generation: the connector grammar of `generate_batch`, plus a per-build
+        incremental collision scene. When a completed brick would collide with the built structure,
+        its tokens are rolled back and the brick is resampled (up to `max_retries`); on exhaustion
+        the build ends. Every returned stream is therefore **collision-free by construction**
+        (bricknet's collision_free_prefix == n_parts).
+
+        The scene mirrors bricknet.first_collision exactly -- same incremental CollisionScene,
+        same exact-duplicate `seen` set, same fixed-parent exclusion -- so a stream that passes here
+        also passes bricknet's own collision metric. Needs the inset meshes (BRICKNET_DATA). Sampling
+        only: greedy cannot escape a rejected placement, so `temperature` must be > 0."""
+        import copy
+        import numpy as np
+        import bricknet
+        from bricknet.collision import CollisionScene
+        from bricknet.core import FixedEdge
+        from lego_tf.bnet import trees as T
+        from lego_tf.bnet.tokenizer import decode
+
+        self.eval()
+        cap = max_new or self.cfg.max_seq
+        max_seq = self.cfg.max_seq
+        use_pose = self.pose_embed is not None
+        pdim = self.cfg.pose_dim
+        streams: list[list[int]] = []
+
+        for start in range(0, n, batch_size):
+            B = min(batch_size, n - start)
+            buf = [[vocab.BOS] for _ in range(B)]
+            gs = [GrammarState(vocab) for _ in range(B)]
+            scene = [CollisionScene() for _ in range(B)]
+            seen: list[set] = [set() for _ in range(B)]
+            done = [False] * B
+            pose_hist = [[[0.0] * pdim] for _ in range(B)] if use_pose else None
+            cur_pose = [[0.0] * pdim for _ in range(B)] if use_pose else None
+            # snapshot at the start of the current (in-progress) brick: (buf_len, gs_copy, attempts, pose)
+            snap = [(1, copy.deepcopy(gs[r]), 0, ([0.0] * pdim if use_pose else None)) for r in range(B)]
+
+            safety = cap * (max_retries + 2)
+            for _ in range(safety):
+                if all(done):
+                    break
+                winlens = [min(len(buf[r]), max_seq) for r in range(B)]
+                W = max(winlens)
+                ids = torch.full((B, W), vocab.PAD, dtype=torch.long, device=device)
+                gidx = torch.zeros(B, dtype=torch.long, device=device)
+                posewin = torch.zeros((B, W, pdim), dtype=torch.float32, device=device) if use_pose else None
+                for r in range(B):
+                    w = winlens[r]
+                    ids[r, :w] = torch.tensor(buf[r][-w:], dtype=torch.long, device=device)
+                    gidx[r] = w - 1
+                    if use_pose:
+                        posewin[r, :w] = torch.tensor(pose_hist[r][-w:], dtype=torch.float32, device=device)
+                last = self._gathered_logits(ids, gidx, pose=posewin)   # (B, vocab)
+                mask = torch.full_like(last, float("-inf"))
+                for r in range(B):
+                    if done[r]:
+                        allowed = [vocab.PAD]
+                    else:
+                        allowed = gs[r].allowed_ids()
+                        if gs[r].n_bricks < min_bricks:
+                            allowed = [i for i in allowed if i != vocab.EOS]
+                    mask[r, allowed] = last[r, allowed]
+                nxt = torch.multinomial((mask / temperature).softmax(-1), 1).squeeze(-1)
+
+                for r in range(B):
+                    if done[r]:
+                        continue
+                    t = int(nxt[r])
+                    buf[r].append(t)
+                    if use_pose:
+                        pose_hist[r].append(list(cur_pose[r]))
+                    prev_nb = gs[r].n_bricks
+                    gs[r].step(t)
+                    if gs[r].done:                       # EOS
+                        done[r] = True
+                        continue
+                    if gs[r].n_bricks <= prev_nb:        # mid-brick token
+                        if len(buf[r]) >= cap:           # length cap mid-brick -> end at the last boundary
+                            blen = snap[r][0]
+                            del buf[r][blen:]            # drop the partial in-progress brick
+                            if use_pose:
+                                del pose_hist[r][blen:]
+                            buf[r].append(vocab.EOS)     # EOS only ever lands at a brick boundary
+                            done[r] = True
+                        continue
+
+                    # a brick just completed -> resolve its world pose and test collision
+                    tree = decode(buf[r], vocab)
+                    try:
+                        mats = bricknet.decode_graph(bricknet.tree_to_graph(tree))
+                    except Exception:
+                        mats = None
+                    reject = mats is None or len(mats) != len(tree.parts)
+                    if not reject:
+                        mat = np.asarray(mats[-1], dtype=np.float64)
+                        pid = tree.parts[-1].part_id
+                        ci = len(tree.parts) - 1
+                        edge = next((e for e in tree.edges if e.child == ci), None)
+                        key = (pid, mat.tobytes())
+                        exclude = edge.parent if isinstance(edge, FixedEdge) else -1
+                        reject = key in seen[r] or bool(
+                            scene[r].check(pid, mat, exclude=exclude, first_only=True))
+
+                    if reject:
+                        blen, gscopy, attempts, cpcopy = snap[r]
+                        del buf[r][blen:]
+                        if use_pose:
+                            del pose_hist[r][blen:]
+                            cur_pose[r] = list(cpcopy)
+                        gs[r] = copy.deepcopy(gscopy)
+                        attempts += 1
+                        snap[r] = (blen, gscopy, attempts, cpcopy)
+                        if attempts > max_retries:       # give up on this brick -> end the build
+                            buf[r].append(vocab.EOS)
+                            done[r] = True
+                    else:
+                        scene[r].add(pid, mat)
+                        seen[r].add(key)
+                        if use_pose:
+                            cur_pose[r] = list(T._pose_feat(mat))
+                        snap[r] = (len(buf[r]), copy.deepcopy(gs[r]), 0,
+                                   (list(cur_pose[r]) if use_pose else None))
+                        if len(buf[r]) >= cap:
+                            buf[r].append(vocab.EOS)
+                            done[r] = True
+            streams.extend(buf)
         return streams
 
     @torch.no_grad()
