@@ -28,6 +28,26 @@ from lego_tf.bnet.tokenizer import Vocab, encode_tree
 
 IGNORE = -100
 
+# built-in vehicle vocabulary for --vehicles-only (matched as whole words, case-insensitive)
+VEHICLE_WORDS = [
+    "car", "cars", "truck", "vehicle", "automobile", "motorcycle", "motorbike", "bike", "bicycle",
+    "scooter", "plane", "airplane", "aircraft", "jet", "helicopter", "boat", "ship", "submarine",
+    "yacht", "train", "locomotive", "tram", "tank", "bus", "van", "jeep", "buggy", "tractor",
+    "bulldozer", "excavator", "forklift", "crane", "rover", "cart", "wagon", "racer", "race car",
+    "racecar", "ambulance", "fire truck", "police car", "spaceship", "spacecraft", "rocket",
+    "shuttle", "dragster", "kart", "go-kart", "hovercraft", "speeder", "roadster", "convertible",
+    "sedan", "suv", "pickup", "trailer", "sled", "snowmobile", "chopper", "biplane", "glider",
+]
+
+
+def _keyword_filter(captions_jsonl: str, keywords: list[str]):
+    """Set of graph ids whose caption contains any keyword (whole-word, case-insensitive)."""
+    import re
+    from lego_tf.bnet.captions import load_captions
+    pat = re.compile(r"\b(" + "|".join(re.escape(k) for k in keywords) + r")\b", re.I)
+    caps = load_captions(captions_jsonl)
+    return {g for g, cs in caps.items() if any(pat.search(c) for c in cs)}
+
 
 def _tokenize_split(split_npz: str, vocab: Vocab, limit: int | None = None):
     """Per-graph LEGO token sequences (component 0), aligned to graph order; None where it fails."""
@@ -92,7 +112,7 @@ def lr_at(it, warmup, max_iters, lr, min_lr):
 
 def train(split, caps, init, out, ctx=1024, batch=64, lr=1e-4, min_lr=1e-5, max_iters=2000,
           warmup=None, cond_drop=0.1, weight_decay=0.1, device=None, seed=0, limit=None,
-          val_frac=0.02, eval_every=250):
+          val_frac=0.02, eval_every=250, captions=None, keywords=None, vehicles_only=False):
     torch.manual_seed(seed)
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     warmup = warmup if warmup is not None else max(50, max_iters // 20)
@@ -104,6 +124,15 @@ def train(split, caps, init, out, ctx=1024, batch=64, lr=1e-4, min_lr=1e-5, max_
     seqs = _tokenize_split(split, vocab, limit=limit)
     usable = [i for i in range(len(seqs))
               if i < len(graph_caps) and seqs[i] is not None and len(seqs[i]) >= 2 and graph_caps[i]]
+
+    kw = VEHICLE_WORDS if vehicles_only else ([k.strip() for k in keywords.split(",")] if keywords else None)
+    if kw:
+        if not captions:
+            raise SystemExit("--vehicles-only/--keywords needs --captions <jsonl>")
+        keep = _keyword_filter(captions, kw)
+        before = len(usable)
+        usable = [i for i in usable if i in keep]
+        print(f"caption filter ({'vehicles' if vehicles_only else 'keywords'}): {before} -> {len(usable)} graphs")
     rng.shuffle(usable)
     n_val = max(1, int(len(usable) * val_frac)) if len(usable) > 50 else 0
     val_idx, train_idx = usable[:n_val], usable[n_val:]
@@ -178,9 +207,13 @@ def main():
     ap.add_argument("--eval-every", type=int, default=250)
     ap.add_argument("--device", default=None)
     ap.add_argument("--limit", type=int, default=None, help="cap graphs (debug)")
+    ap.add_argument("--captions", default=None, help="captions jsonl (needed for --vehicles-only/--keywords)")
+    ap.add_argument("--vehicles-only", action="store_true", help="train only on vehicle captions (built-in list)")
+    ap.add_argument("--keywords", default=None, help="comma-separated: keep graphs whose caption has any")
     a = ap.parse_args()
     train(a.split, a.caps, a.init, a.out, ctx=a.ctx, batch=a.batch, lr=a.lr, max_iters=a.max_iters,
-          cond_drop=a.cond_drop, eval_every=a.eval_every, device=a.device, limit=a.limit)
+          cond_drop=a.cond_drop, eval_every=a.eval_every, device=a.device, limit=a.limit,
+          captions=a.captions, vehicles_only=a.vehicles_only, keywords=a.keywords)
 
 
 if __name__ == "__main__":

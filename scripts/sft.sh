@@ -15,6 +15,7 @@ OUT="${OUT:-runs/sft-25M}"
 CAPS="${CAPS:-data/sft}"                 # prefix for <CAPS>.capemb.f16 + .capmap.json
 CAPS_MODEL="${CAPS_MODEL:-sentence-transformers/all-MiniLM-L6-v2}"
 MAXITERS="${MAXITERS:-2000}"; BATCH="${BATCH:-64}"; LR="${LR:-1e-4}"; CFG_DROP="${CFG_DROP:-0.1}"
+VEHICLES_ONLY="${VEHICLES_ONLY:-}"       # set to 1 to train only on vehicle captions
 S3_PROFILE="${S3_PROFILE:-brickformer}"; S3_BUCKET="${S3_BUCKET:-brickformer}"; S3_PREFIX="${S3_PREFIX:-bricknet/}"
 
 echo ">> installing SFT deps (text encoder)"
@@ -32,9 +33,10 @@ if [ ! -f "$CAPS.capemb.f16" ]; then
   python -m lego_tf.bnet.captions --split "$SPLIT" --captions "$CAPTIONS" --out "$CAPS" --model "$CAPS_MODEL"
 fi
 
-echo ">> SFT: fine-tuning $INIT -> $OUT"
+FILTER_ARG=""; [ -n "$VEHICLES_ONLY" ] && FILTER_ARG="--vehicles-only --captions $CAPTIONS"
+echo ">> SFT: fine-tuning $INIT -> $OUT ${VEHICLES_ONLY:+(vehicles only)}"
 python -m lego_tf.bnet.train_sft --split "$SPLIT" --caps "$CAPS" --init "$INIT" --out "$OUT" \
-  --max-iters "$MAXITERS" --batch "$BATCH" --lr "$LR" --cond-drop "$CFG_DROP"
+  --max-iters "$MAXITERS" --batch "$BATCH" --lr "$LR" --cond-drop "$CFG_DROP" $FILTER_ARG
 
 echo ">> done. Generate with a prompt:"
 echo "   python -m lego_tf.bnet.evaluate --ckpt $OUT/best.pt --n 16 --collision-free \\"
